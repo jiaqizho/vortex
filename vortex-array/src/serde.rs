@@ -387,6 +387,28 @@ impl ArrayParts {
             })
     }
 
+    /// Create an `ArrayParts` from a raw flatbuffer and pre-split buffers.
+    ///
+    /// This is used by the range read path where buffers have been partially
+    /// read and need to replace the original segment's buffers.
+    pub fn from_flatbuffer_with_buffers(
+        flatbuffer_bytes: ByteBuffer,
+        buffers: Vec<ByteBuffer>,
+    ) -> VortexResult<Self> {
+        let fb = FlatBuffer::align_from(flatbuffer_bytes);
+        let fb_array = root::<fba::Array>(fb.as_ref())?;
+        let fb_root = fb_array
+            .root()
+            .ok_or_else(|| vortex_err!("Array has no root node"))?;
+        let flatbuffer_loc = fb_root._tab.loc();
+
+        Ok(Self {
+            flatbuffer: fb,
+            flatbuffer_loc,
+            buffers: buffers.into(),
+        })
+    }
+
     /// Returns the root ArrayNode flatbuffer.
     fn flatbuffer(&self) -> fba::ArrayNode<'_> {
         unsafe { fba::ArrayNode::follow(self.flatbuffer.as_ref(), self.flatbuffer_loc) }

@@ -10,8 +10,9 @@ use std::ops::Range;
 use vortex_array::arrays::DecimalArray;
 use vortex_array::stats::{ArrayStats, StatsSetRef};
 use vortex_array::vtable::{
-    ArrayVTable, CanonicalVTable, NotSupported, OperationsVTable, VTable, ValidityChild,
-    ValidityHelper, ValidityVTableFromChild,
+    ArrayVTable, CanonicalVTable, ChildRangeRead, EncodingRangeRead, NotSupported,
+    OperationsVTable, RangeDecodeInfo, VTable, ValidityChild, ValidityHelper,
+    ValidityVTableFromChild,
 };
 use vortex_array::{
     Array, ArrayEq, ArrayHash, ArrayRef, Canonical, EncodingId, EncodingRef, IntoArray, Precision,
@@ -20,6 +21,8 @@ use vortex_array::{
 use vortex_dtype::{DType, DecimalDType, match_each_signed_integer_ptype};
 use vortex_error::{VortexExpect, VortexResult, vortex_bail};
 use vortex_scalar::{DecimalValue, Scalar};
+
+use self::serde::DecimalBytesPartsMetadata;
 
 vtable!(DecimalByteParts);
 
@@ -43,6 +46,27 @@ impl VTable for DecimalBytePartsVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(DecimalBytePartsEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        metadata: &DecimalBytesPartsMetadata,
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        let child_dtype = DType::Primitive(metadata.zeroth_child_ptype(), dtype.nullability());
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![ChildRangeRead::Recurse {
+                row_range,
+                row_count,
+                dtype: child_dtype,
+            }],
+            decode_info: RangeDecodeInfo::FromChild {
+                child_idx: 0,
+                divisor: 1,
+            },
+        })
     }
 }
 

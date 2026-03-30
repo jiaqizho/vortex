@@ -55,6 +55,10 @@ pub struct ScanBuilder<A> {
     /// The row-offset assigned to the first row of the file. Used by the `row_idx` expression,
     /// but not by the scan [`Selection`] which remains relative.
     row_offset: u64,
+    /// Whether to split row indices into merged ranges (true, default) or keep each index as
+    /// its own single-row range (false). When false and selection is `IncludeByIndex` with no
+    /// `row_range`, each index becomes a `idx..idx+1` range.
+    split_row_indices: bool,
 }
 
 impl ScanBuilder<ArrayRef> {
@@ -76,6 +80,7 @@ impl ScanBuilder<ArrayRef> {
             file_stats: None,
             limit: None,
             row_offset: 0,
+            split_row_indices: true,
         }
     }
 
@@ -143,6 +148,13 @@ impl<A: 'static + Send> ScanBuilder<A> {
         self
     }
 
+    /// Controls whether `IncludeByIndex` row indices are merged into ranges (default `true`)
+    /// or kept as individual single-row ranges (`false`).
+    pub fn with_split_row_indices(mut self, split: bool) -> Self {
+        self.split_row_indices = split;
+        self
+    }
+
     pub fn with_split_by(mut self, split_by: SplitBy) -> Self {
         self.split_by = split_by;
         self
@@ -191,6 +203,7 @@ impl<A: 'static + Send> ScanBuilder<A> {
             file_stats: self.file_stats,
             limit: self.limit,
             row_offset: self.row_offset,
+            split_row_indices: self.split_row_indices,
             map_fn: Arc::new(move |a| old_map_fn(a).and_then(&map_fn)),
         }
     }
@@ -223,9 +236,23 @@ impl<A: 'static + Send> ScanBuilder<A> {
             filter_and_projection_masks(&projection, filter.as_ref(), layout_reader.dtype())?;
         let field_mask: Vec<_> = [filter_mask, projection_mask].concat();
 
-        let splits =
-            if let Some(ranges) = attempt_split_ranges(&self.selection, self.row_range.as_ref()) {
-                Splits::Ranges(ranges)
+        let splits = if !self.split_row_indices {
+            // When split_row_indices is false, each index becomes its own single-row range.
+            if let Selection::IncludeByIndex(ref indices) = self.selection {
+                if self.row_range.is_none() {
+                    Splits::Ranges(indices.iter().map(|&idx| idx..idx + 1).collect())
+                } else {
+                    // Fall through to normal logic when row_range is set.
+                    let split_range = self
+                        .row_range
+                        .clone()
+                        .unwrap_or_else(|| 0..layout_reader.row_count());
+                    Splits::Natural(self.split_by.splits(
+                        layout_reader.as_ref(),
+                        &split_range,
+                        &field_mask,
+                    )?)
+                }
             } else {
                 let split_range = self
                     .row_range
@@ -236,7 +263,21 @@ impl<A: 'static + Send> ScanBuilder<A> {
                     &split_range,
                     &field_mask,
                 )?)
-            };
+            }
+        } else if let Some(ranges) = attempt_split_ranges(&self.selection, self.row_range.as_ref())
+        {
+            Splits::Ranges(ranges)
+        } else {
+            let split_range = self
+                .row_range
+                .clone()
+                .unwrap_or_else(|| 0..layout_reader.row_count());
+            Splits::Natural(self.split_by.splits(
+                layout_reader.as_ref(),
+                &split_range,
+                &field_mask,
+            )?)
+        };
 
         Ok(RepeatedScan::new(
             self.session.clone(),

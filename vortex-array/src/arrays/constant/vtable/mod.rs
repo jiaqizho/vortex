@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::ops::Range;
+
+use vortex_dtype::DType;
+
 use crate::arrays::ConstantArray;
-use crate::vtable::{NotSupported, VTable};
-use crate::{EncodingId, EncodingRef, vtable};
+use crate::vtable::{BufferSubRange, EncodingRangeRead, NotSupported, RangeDecodeInfo, VTable};
+use crate::{EmptyMetadata, EncodingId, EncodingRef, vtable};
 
 mod array;
 mod canonical;
@@ -40,5 +44,21 @@ impl VTable for ConstantVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(ConstantEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        _metadata: &EmptyMetadata,
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![BufferSubRange::Full],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Leaf {
+                decode_len: row_range.len(),
+                post_slice: None,
+            },
+        })
     }
 }

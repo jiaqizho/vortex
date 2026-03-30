@@ -6,12 +6,12 @@ use std::ops::Range;
 
 use vortex_array::stats::{ArrayStats, StatsSetRef};
 use vortex_array::vtable::{
-    ArrayVTable, CanonicalVTable, NotSupported, OperationsVTable, VTable, ValidityChild,
-    ValidityVTableFromChild,
+    ArrayVTable, CanonicalVTable, ChildRangeRead, EncodingRangeRead, NotSupported,
+    OperationsVTable, RangeDecodeInfo, VTable, ValidityChild, ValidityVTableFromChild,
 };
 use vortex_array::{
-    Array, ArrayEq, ArrayHash, ArrayRef, Canonical, EncodingId, EncodingRef, IntoArray, Precision,
-    ToCanonical, vtable,
+    Array, ArrayEq, ArrayHash, ArrayRef, Canonical, EmptyMetadata, EncodingId, EncodingRef,
+    IntoArray, Precision, ToCanonical, vtable,
 };
 use vortex_dtype::{DType, PType, match_each_unsigned_integer_ptype};
 use vortex_error::{VortexExpect, VortexResult, vortex_bail};
@@ -43,6 +43,28 @@ impl VTable for ZigZagVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(ZigZagEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        _metadata: &EmptyMetadata,
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        let ptype = PType::try_from(dtype).ok()?;
+        let encoded_dtype = DType::Primitive(ptype.to_unsigned(), dtype.nullability());
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![ChildRangeRead::Recurse {
+                row_range,
+                row_count,
+                dtype: encoded_dtype,
+            }],
+            decode_info: RangeDecodeInfo::FromChild {
+                child_idx: 0,
+                divisor: 1,
+            },
+        })
     }
 }
 

@@ -53,6 +53,16 @@ impl Default for LayoutSession {
     }
 }
 
+/// Session flag to enable/disable range reads.
+#[derive(Debug, Clone)]
+pub struct RangeReadEnabled(pub bool);
+
+impl Default for RangeReadEnabled {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
 /// Extension trait for accessing layout session data.
 pub trait LayoutSessionExt: SessionExt {
     /// Returns the layout encoding registry.

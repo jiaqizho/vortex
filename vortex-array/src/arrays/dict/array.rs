@@ -3,14 +3,19 @@
 
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::ops::Range;
 
 use vortex_buffer::BitBuffer;
-use vortex_dtype::{DType, match_each_integer_ptype};
+use vortex_dtype::{DType, Nullability, match_each_integer_ptype};
 use vortex_error::{VortexExpect as _, VortexResult, vortex_bail};
 use vortex_mask::{AllOr, Mask};
 
+use super::serde::DictMetadata;
 use crate::stats::{ArrayStats, StatsSetRef};
-use crate::vtable::{ArrayVTable, NotSupported, VTable, ValidityVTable};
+use crate::vtable::{
+    ArrayVTable, ChildRangeRead, EncodingRangeRead, NotSupported, RangeDecodeInfo, VTable,
+    ValidityVTable,
+};
 use crate::{
     Array, ArrayEq, ArrayHash, ArrayRef, EncodingId, EncodingRef, Precision, ToCanonical, vtable,
 };
@@ -37,6 +42,31 @@ impl VTable for DictVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(DictEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        metadata: &DictMetadata,
+        row_range: Range<usize>,
+        row_count: usize,
+        _dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        let codes_dtype = DType::Primitive(metadata.codes_ptype(), Nullability::NonNullable);
+
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![
+                ChildRangeRead::Recurse {
+                    row_range,
+                    row_count,
+                    dtype: codes_dtype,
+                },
+                ChildRangeRead::Full,
+            ],
+            decode_info: RangeDecodeInfo::FromChild {
+                child_idx: 0,
+                divisor: 1,
+            },
+        })
     }
 }
 

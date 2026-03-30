@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use futures::{FutureExt, TryFutureExt};
+use vortex_buffer::Alignment;
 use vortex_error::{VortexError, vortex_err};
 use vortex_io::VortexReadAt;
 use vortex_layout::segments::{SegmentFuture, SegmentId, SegmentSource};
@@ -38,5 +39,23 @@ impl SegmentSource for FileSegmentSource {
                 .await
         }
         .boxed()
+    }
+
+    fn request_range(&self, id: SegmentId, range: std::ops::Range<usize>) -> SegmentFuture {
+        let spec = match self.segments.get(*id as usize) {
+            Some(spec) => spec.clone(),
+            None => {
+                return futures::future::ready(Err(vortex_err!("Missing segment: {}", id))).boxed();
+            }
+        };
+
+        let offset = spec.offset + range.start as u64;
+        let length = range.len();
+
+        self.read
+            .clone()
+            .read_at(offset, length, Alignment::none())
+            .map_err(VortexError::from)
+            .boxed()
     }
 }

@@ -24,6 +24,13 @@ pub struct ALPMetadata {
     patches: Option<PatchesMetadata>,
 }
 
+impl ALPMetadata {
+    /// Returns whether this ALP encoding has patches.
+    pub fn has_patches(&self) -> bool {
+        self.patches.is_some()
+    }
+}
+
 impl SerdeVTable<ALPVTable> for ALPVTable {
     type Metadata = ProstMetadata<ALPMetadata>;
 

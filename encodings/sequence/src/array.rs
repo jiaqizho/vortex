@@ -8,8 +8,8 @@ use num_traits::cast::FromPrimitive;
 use vortex_array::arrays::PrimitiveArray;
 use vortex_array::stats::{ArrayStats, StatsSetRef};
 use vortex_array::vtable::{
-    ArrayVTable, CanonicalVTable, NotSupported, OperationsVTable, VTable, ValidityVTable,
-    VisitorVTable,
+    ArrayVTable, CanonicalVTable, EncodingRangeRead, NotSupported, OperationsVTable,
+    RangeDecodeInfo, VTable, ValidityVTable, VisitorVTable,
 };
 use vortex_array::{
     ArrayBufferVisitor, ArrayChildVisitor, ArrayRef, Canonical, EncodingId, EncodingRef, Precision,
@@ -22,6 +22,8 @@ use vortex_dtype::{
 use vortex_error::{VortexExpect, VortexResult, vortex_bail, vortex_err};
 use vortex_mask::Mask;
 use vortex_scalar::{PValue, Scalar, ScalarValue};
+
+use crate::serde::SequenceMetadata;
 
 vtable!(Sequence);
 
@@ -168,6 +170,22 @@ impl VTable for SequenceVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(SequenceEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        _metadata: &SequenceMetadata,
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Leaf {
+                decode_len: row_range.len(),
+                post_slice: None,
+            },
+        })
     }
 }
 

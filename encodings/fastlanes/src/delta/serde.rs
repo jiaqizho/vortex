@@ -8,7 +8,7 @@ use vortex_array::{
 };
 use vortex_buffer::ByteBuffer;
 use vortex_dtype::{DType, PType, match_each_unsigned_integer_ptype};
-use vortex_error::{VortexResult, vortex_err};
+use vortex_error::VortexResult;
 
 use super::DeltaEncoding;
 use crate::{DeltaArray, DeltaVTable};
@@ -17,9 +17,9 @@ use crate::{DeltaArray, DeltaVTable};
 #[repr(C)]
 pub struct DeltaMetadata {
     #[prost(uint64, tag = "1")]
-    deltas_len: u64,
+    pub(crate) deltas_len: u64,
     #[prost(uint32, tag = "2")]
-    offset: u32, // must be <1024
+    pub(crate) offset: u32, // must be <1024
 }
 
 impl SerdeVTable<DeltaVTable> for DeltaVTable {
@@ -45,11 +45,16 @@ impl SerdeVTable<DeltaVTable> for DeltaVTable {
         let lanes =
             match_each_unsigned_integer_ptype!(ptype, |T| { <T as fastlanes::FastLanes>::LANES });
 
-        // Compute the length of the bases array
-        let deltas_len = usize::try_from(metadata.deltas_len)
-            .map_err(|_| vortex_err!("deltas_len {} overflowed usize", metadata.deltas_len))?;
+        // Compute the length of the bases array.
+        // Use len + offset instead of metadata.deltas_len to support range reads where the
+        // buffer may be shorter than the original deltas_len.
+        let deltas_len = len + metadata.offset as usize;
         let num_chunks = deltas_len / 1024;
-        let remainder_base_size = if deltas_len % 1024 > 0 { 1 } else { 0 };
+        let remainder_base_size = if !deltas_len.is_multiple_of(1024) {
+            1
+        } else {
+            0
+        };
         let bases_len = num_chunks * lanes + remainder_base_size;
 
         let bases = children.get(0, dtype, bases_len)?;

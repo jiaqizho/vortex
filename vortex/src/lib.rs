@@ -6,18 +6,26 @@
 
 use vortex_array::expr::session::ExprSession;
 pub use vortex_array::*;
+pub use vortex_buffer as buffer;
+pub use vortex_dtype as dtype;
+pub use vortex_error as error;
 #[cfg(feature = "files")]
 pub use vortex_file as file;
+pub use vortex_flatbuffers as flatbuffers;
+pub use vortex_io as io;
 use vortex_io::session::RuntimeSession;
+pub use vortex_ipc as ipc;
+pub use vortex_layout as layout;
 use vortex_layout::session::LayoutSession;
+pub use vortex_mask as mask;
+pub use vortex_metrics as metrics;
 use vortex_metrics::VortexMetrics;
+pub use vortex_proto as proto;
+pub use vortex_scalar as scalar;
+pub use vortex_scan as scan;
+pub use vortex_session as session;
 use vortex_session::VortexSession;
-pub use {
-    vortex_buffer as buffer, vortex_dtype as dtype, vortex_error as error,
-    vortex_flatbuffers as flatbuffers, vortex_io as io, vortex_ipc as ipc, vortex_layout as layout,
-    vortex_mask as mask, vortex_metrics as metrics, vortex_proto as proto, vortex_scalar as scalar,
-    vortex_scan as scan, vortex_session as session, vortex_utils as utils,
-};
+pub use vortex_utils as utils;
 
 pub mod compressor {
     pub use vortex_btrblocks::BtrBlocksCompressor;
@@ -26,14 +34,19 @@ pub mod compressor {
 }
 
 pub mod encodings {
+    pub use vortex_alp as alp;
+    pub use vortex_bytebool as bytebool;
+    pub use vortex_datetime_parts as datetime_parts;
+    pub use vortex_decimal_byte_parts as decimal_byte_parts;
+    pub use vortex_fastlanes as fastlanes;
+    pub use vortex_fsst as fsst;
+    pub use vortex_pco as pco;
+    pub use vortex_runend as runend;
+    pub use vortex_sequence as sequence;
+    pub use vortex_sparse as sparse;
+    pub use vortex_zigzag as zigzag;
     #[cfg(feature = "zstd")]
     pub use vortex_zstd as zstd;
-    pub use {
-        vortex_alp as alp, vortex_bytebool as bytebool, vortex_datetime_parts as datetime_parts,
-        vortex_decimal_byte_parts as decimal_byte_parts, vortex_fastlanes as fastlanes,
-        vortex_fsst as fsst, vortex_pco as pco, vortex_runend as runend,
-        vortex_sequence as sequence, vortex_sparse as sparse, vortex_zigzag as zigzag,
-    };
 }
 
 /// Extension trait to create a default Vortex session.

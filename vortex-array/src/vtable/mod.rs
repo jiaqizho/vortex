@@ -9,12 +9,13 @@ mod compute;
 mod encode;
 mod operations;
 mod operator;
+pub mod range_read;
 mod serde;
 mod validity;
 mod visitor;
 
 use std::fmt::Debug;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 
 pub use array::*;
 pub use canonical::*;
@@ -22,11 +23,13 @@ pub use compute::*;
 pub use encode::*;
 pub use operations::*;
 pub use operator::*;
+pub use range_read::*;
 pub use serde::*;
 pub use validity::*;
 pub use visitor::*;
+use vortex_dtype::DType;
 
-use crate::{Array, Encoding, EncodingId, EncodingRef, IntoArray};
+use crate::{Array, DeserializeMetadata, Encoding, EncodingId, EncodingRef, IntoArray};
 
 /// The encoding [`VTable`] encapsulates logic for an Encoding type and associated Array type.
 /// The logic is split across several "VTable" traits to enable easier code organization than
@@ -72,6 +75,27 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
 
     /// Returns the encoding for the array.
     fn encoding(array: &Self::Array) -> EncodingRef;
+
+    /// Plan a sub-segment range read for the given row range.
+    ///
+    /// This method is called during I/O planning to determine which byte ranges of a
+    /// segment's buffers are needed for a given row range, allowing targeted reads instead
+    /// of fetching the entire segment.
+    ///
+    /// The returned [`EncodingRangeRead::children`] should cover the encoding's own
+    /// children (e.g., codes + values for Dict). The planner will detect any additional
+    /// children (e.g., validity) not covered by the plan and fall back to a full read.
+    ///
+    /// Returns `None` if the encoding does not support range reads, in which case the
+    /// caller falls back to reading the full segment.
+    fn plan_range_read(
+        _metadata: &<<Self::SerdeVTable as SerdeVTable<Self>>::Metadata as DeserializeMetadata>::Output,
+        _row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        None
+    }
 }
 
 /// Placeholder type used to indicate when a particular vtable is not supported by the encoding.

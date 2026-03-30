@@ -3,16 +3,20 @@
 
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::ops::Range;
 
 use vortex_array::stats::{ArrayStats, StatsSetRef};
 use vortex_array::vtable::{
-    ArrayVTable, NotSupported, VTable, ValidityChild, ValidityVTableFromChild,
+    ArrayVTable, ChildRangeRead, EncodingRangeRead, NotSupported, RangeDecodeInfo, VTable,
+    ValidityChild, ValidityVTableFromChild,
 };
 use vortex_array::{
     Array, ArrayEq, ArrayHash, ArrayRef, EncodingId, EncodingRef, Precision, vtable,
 };
-use vortex_dtype::DType;
+use vortex_dtype::{DType, Nullability};
 use vortex_error::{VortexResult, vortex_bail};
+
+use crate::serde::DateTimePartsMetadata;
 
 vtable!(DateTimeParts);
 
@@ -36,6 +40,41 @@ impl VTable for DateTimePartsVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(DateTimePartsEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        metadata: &DateTimePartsMetadata,
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        let days_ptype = metadata.days_ptype();
+        let seconds_ptype = metadata.seconds_ptype();
+        let subseconds_ptype = metadata.subseconds_ptype();
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![
+                ChildRangeRead::Recurse {
+                    row_range: row_range.clone(),
+                    row_count,
+                    dtype: DType::Primitive(days_ptype, dtype.nullability()),
+                },
+                ChildRangeRead::Recurse {
+                    row_range: row_range.clone(),
+                    row_count,
+                    dtype: DType::Primitive(seconds_ptype, Nullability::NonNullable),
+                },
+                ChildRangeRead::Recurse {
+                    row_range,
+                    row_count,
+                    dtype: DType::Primitive(subseconds_ptype, Nullability::NonNullable),
+                },
+            ],
+            decode_info: RangeDecodeInfo::FromChild {
+                child_idx: 0,
+                divisor: 1,
+            },
+        })
     }
 }
 

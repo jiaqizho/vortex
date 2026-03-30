@@ -15,8 +15,8 @@ use crate::execution::{BatchKernelRef, BindCtx, kernel};
 use crate::serde::ArrayChildren;
 use crate::stats::{ArrayStats, StatsSetRef};
 use crate::vtable::{
-    ArrayVTable, CanonicalVTable, NotSupported, OperationsVTable, OperatorVTable, SerdeVTable,
-    VTable, ValidityVTable, VisitorVTable,
+    ArrayVTable, CanonicalVTable, EncodingRangeRead, NotSupported, OperationsVTable,
+    OperatorVTable, RangeDecodeInfo, SerdeVTable, VTable, ValidityVTable, VisitorVTable,
 };
 use crate::{
     ArrayBufferVisitor, ArrayChildVisitor, ArrayRef, Canonical, EmptyMetadata, EncodingId,
@@ -47,6 +47,22 @@ impl VTable for NullVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(NullEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        _metadata: &EmptyMetadata,
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Leaf {
+                decode_len: row_range.len(),
+                post_slice: None,
+            },
+        })
     }
 }
 

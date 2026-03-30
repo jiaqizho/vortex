@@ -3,6 +3,7 @@
 
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::ops::Range;
 
 pub use compress::*;
 use fastlanes::FastLanes;
@@ -10,8 +11,8 @@ use vortex_array::arrays::PrimitiveArray;
 use vortex_array::stats::{ArrayStats, StatsSetRef};
 use vortex_array::validity::Validity;
 use vortex_array::vtable::{
-    ArrayVTable, CanonicalVTable, NotSupported, VTable, ValidityChildSliceHelper,
-    ValidityVTableFromChildSliceHelper,
+    ArrayVTable, CanonicalVTable, ChildRangeRead, EncodingRangeRead, NotSupported, RangeDecodeInfo,
+    VTable, ValidityChildSliceHelper, ValidityVTableFromChildSliceHelper,
 };
 use vortex_array::{
     Array, ArrayEq, ArrayHash, ArrayRef, Canonical, EncodingId, EncodingRef, IntoArray, Precision,
@@ -20,6 +21,8 @@ use vortex_array::{
 use vortex_buffer::Buffer;
 use vortex_dtype::{DType, NativePType, PType, match_each_unsigned_integer_ptype};
 use vortex_error::{VortexExpect as _, VortexResult, vortex_bail};
+
+use self::serde::DeltaMetadata;
 
 mod compress;
 mod compute;
@@ -48,6 +51,72 @@ impl VTable for DeltaVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(DeltaEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        metadata: &DeltaMetadata,
+        row_range: Range<usize>,
+        _row_count: usize,
+        dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        if metadata.offset != 0 {
+            return None;
+        }
+
+        let deltas_len = usize::try_from(metadata.deltas_len).ok()?;
+        let byte_width = match dtype {
+            DType::Primitive(ptype, _) => ptype.byte_width(),
+            _ => return None,
+        };
+        let lanes = match byte_width {
+            1 => 128,
+            2 => 64,
+            4 => 32,
+            8 => 16,
+            _ => return None,
+        };
+
+        let first_chunk = row_range.start / 1024;
+        let last_chunk = row_range.end.saturating_sub(1) / 1024;
+
+        let deltas_row_start = first_chunk * 1024;
+        let deltas_row_end = ((last_chunk + 1) * 1024).min(deltas_len);
+
+        let num_full_chunks = deltas_len / 1024;
+        let has_remainder = !deltas_len.is_multiple_of(1024);
+        let bases_len = num_full_chunks * lanes + if has_remainder { 1 } else { 0 };
+        let bases_row_start = first_chunk * lanes;
+        let bases_row_end = if last_chunk >= num_full_chunks {
+            bases_len
+        } else {
+            (last_chunk + 1) * lanes
+        }
+        .min(bases_len);
+
+        let sub_deltas_len = deltas_row_end - deltas_row_start;
+        let intra_chunk_offset = row_range.start - deltas_row_start;
+        let post_slice = (intra_chunk_offset > 0 || sub_deltas_len > row_range.len())
+            .then(|| intra_chunk_offset..(intra_chunk_offset + row_range.len()));
+
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![
+                ChildRangeRead::Recurse {
+                    row_range: bases_row_start..bases_row_end,
+                    row_count: bases_len,
+                    dtype: dtype.clone(),
+                },
+                ChildRangeRead::Recurse {
+                    row_range: deltas_row_start..deltas_row_end,
+                    row_count: deltas_len,
+                    dtype: dtype.clone(),
+                },
+            ],
+            decode_info: RangeDecodeInfo::Leaf {
+                decode_len: sub_deltas_len,
+                post_slice,
+            },
+        })
     }
 }
 

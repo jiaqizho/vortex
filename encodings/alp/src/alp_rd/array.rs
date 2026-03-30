@@ -3,23 +3,26 @@
 
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::ops::Range;
 
 use vortex_array::arrays::PrimitiveArray;
 use vortex_array::patches::Patches;
 use vortex_array::stats::{ArrayStats, StatsSetRef};
 use vortex_array::validity::Validity;
 use vortex_array::vtable::{
-    ArrayVTable, CanonicalVTable, NotSupported, VTable, ValidityChild, ValidityVTableFromChild,
+    ArrayVTable, CanonicalVTable, ChildRangeRead, EncodingRangeRead, NotSupported, RangeDecodeInfo,
+    VTable, ValidityChild, ValidityVTableFromChild,
 };
 use vortex_array::{
     Array, ArrayEq, ArrayHash, ArrayRef, Canonical, EncodingId, EncodingRef, Precision,
     ToCanonical, vtable,
 };
 use vortex_buffer::Buffer;
-use vortex_dtype::{DType, PType};
+use vortex_dtype::{DType, Nullability, PType};
 use vortex_error::{VortexResult, vortex_bail};
 
 use crate::alp_rd::alp_rd_decode;
+use crate::alp_rd::serde::ALPRDMetadata;
 
 vtable!(ALPRD);
 
@@ -43,6 +46,47 @@ impl VTable for ALPRDVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(ALPRDEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        metadata: &ALPRDMetadata,
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        if metadata.has_patches() {
+            return None;
+        }
+        let left_parts_ptype = metadata.left_parts_ptype();
+        let left_parts_dtype = DType::Primitive(left_parts_ptype, dtype.nullability());
+        let right_parts_dtype = match dtype {
+            DType::Primitive(PType::F32, _) => {
+                DType::Primitive(PType::U32, Nullability::NonNullable)
+            }
+            DType::Primitive(PType::F64, _) => {
+                DType::Primitive(PType::U64, Nullability::NonNullable)
+            }
+            _ => return None,
+        };
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![
+                ChildRangeRead::Recurse {
+                    row_range: row_range.clone(),
+                    row_count,
+                    dtype: left_parts_dtype,
+                },
+                ChildRangeRead::Recurse {
+                    row_range,
+                    row_count,
+                    dtype: right_parts_dtype,
+                },
+            ],
+            decode_info: RangeDecodeInfo::FromChild {
+                child_idx: 0,
+                divisor: 1,
+            },
+        })
     }
 }
 

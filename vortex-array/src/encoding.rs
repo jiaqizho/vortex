@@ -5,6 +5,7 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Display, Formatter};
+use std::ops::Range;
 use std::sync::Arc;
 
 use arcref::ArcRef;
@@ -13,7 +14,7 @@ use vortex_dtype::DType;
 use vortex_error::{VortexExpect, VortexResult, vortex_bail, vortex_err};
 
 use crate::serde::ArrayChildren;
-use crate::vtable::{EncodeVTable, SerdeVTable, VTable};
+use crate::vtable::{EncodeVTable, EncodingRangeRead, SerdeVTable, VTable};
 use crate::{Array, ArrayRef, Canonical, DeserializeMetadata};
 
 /// EncodingId is a globally unique name of the array's encoding.
@@ -48,6 +49,20 @@ pub trait Encoding: 'static + private::Sealed + Send + Sync + Debug {
     /// Panics if `like` is encoded with a different encoding.
     fn encode(&self, input: &Canonical, like: Option<&dyn Array>)
     -> VortexResult<Option<ArrayRef>>;
+
+    /// Plan a sub-segment range read for the given row range.
+    ///
+    /// Deserializes the raw metadata bytes and delegates to the encoding's
+    /// [`VTable::plan_range_read`](crate::vtable::VTable::plan_range_read).
+    fn plan_range_read(
+        &self,
+        _metadata: &[u8],
+        _row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        None
+    }
 }
 
 /// Adapter struct used to lift the [`VTable`] trait into an object-safe [`Encoding`]
@@ -90,6 +105,21 @@ impl<V: VTable> Encoding for EncodingAdapter<V> {
         assert_eq!(array.len(), len, "Array length mismatch after building");
         assert_eq!(array.dtype(), dtype, "Array dtype mismatch after building");
         Ok(array.to_array())
+    }
+
+    fn plan_range_read(
+        &self,
+        metadata: &[u8],
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        let metadata =
+            <<V::SerdeVTable as SerdeVTable<V>>::Metadata as DeserializeMetadata>::deserialize(
+                metadata,
+            )
+            .ok()?;
+        V::plan_range_read(&metadata, row_range, row_count, dtype)
     }
 
     fn encode(

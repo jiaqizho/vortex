@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::ops::Range;
+
+use vortex_dtype::DType;
+
 use crate::arrays::FixedSizeListArray;
-use crate::vtable::{NotSupported, VTable, ValidityVTableFromValidityHelper};
-use crate::{EncodingId, EncodingRef, vtable};
+use crate::vtable::{
+    ChildRangeRead, EncodingRangeRead, NotSupported, RangeDecodeInfo, VTable,
+    ValidityVTableFromValidityHelper,
+};
+use crate::{EmptyMetadata, EncodingId, EncodingRef, vtable};
 
 mod array;
 mod canonical;
@@ -37,5 +44,35 @@ impl VTable for FixedSizeListVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(FixedSizeListEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        _metadata: &EmptyMetadata,
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        let (element_dtype, list_size) = match dtype {
+            DType::FixedSizeList(element_dtype, list_size, _) => {
+                (element_dtype.as_ref().clone(), *list_size as usize)
+            }
+            _ => return None,
+        };
+
+        let element_range = (row_range.start * list_size)..(row_range.end * list_size);
+        let element_count = row_count * list_size;
+
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![ChildRangeRead::Recurse {
+                row_range: element_range,
+                row_count: element_count,
+                dtype: element_dtype,
+            }],
+            decode_info: RangeDecodeInfo::FromChild {
+                child_idx: 0,
+                divisor: list_size,
+            },
+        })
     }
 }

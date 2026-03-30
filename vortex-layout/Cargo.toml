@@ -63,8 +63,15 @@ vortex-gpu = { workspace = true, features = ["cuda"] }
 futures = { workspace = true, features = ["executor"] }
 rstest = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
+vortex-alp = { workspace = true }
 vortex-array = { path = "../vortex-array", features = ["test-harness"] }
+vortex-bytebool = { workspace = true }
+vortex-datetime-parts = { workspace = true }
+vortex-decimal-byte-parts = { workspace = true }
+vortex-fastlanes = { workspace = true }
 vortex-io = { path = "../vortex-io", features = ["tokio"] }
+vortex-sequence = { workspace = true }
+vortex-zigzag = { workspace = true }
 
 [features]
 test-harness = []

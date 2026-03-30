@@ -27,6 +27,13 @@ pub struct ALPRDMetadata {
     patches: Option<PatchesMetadata>,
 }
 
+impl ALPRDMetadata {
+    /// Returns whether this ALPRD encoding has patches.
+    pub fn has_patches(&self) -> bool {
+        self.patches.is_some()
+    }
+}
+
 impl SerdeVTable<ALPRDVTable> for ALPRDVTable {
     type Metadata = ProstMetadata<ALPRDMetadata>;
 

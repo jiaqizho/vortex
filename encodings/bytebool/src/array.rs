@@ -9,11 +9,12 @@ use vortex_array::arrays::BoolArray;
 use vortex_array::stats::{ArrayStats, StatsSetRef};
 use vortex_array::validity::Validity;
 use vortex_array::vtable::{
-    ArrayVTable, CanonicalVTable, NotSupported, OperationsVTable, VTable, ValidityHelper,
-    ValidityVTableFromValidityHelper,
+    ArrayVTable, BufferSubRange, CanonicalVTable, EncodingRangeRead, NotSupported,
+    OperationsVTable, RangeDecodeInfo, VTable, ValidityHelper, ValidityVTableFromValidityHelper,
 };
 use vortex_array::{
-    ArrayEq, ArrayHash, ArrayRef, Canonical, EncodingId, EncodingRef, IntoArray, Precision, vtable,
+    ArrayEq, ArrayHash, ArrayRef, Canonical, EmptyMetadata, EncodingId, EncodingRef, IntoArray,
+    Precision, vtable,
 };
 use vortex_buffer::{BitBuffer, ByteBuffer};
 use vortex_dtype::DType;
@@ -42,6 +43,22 @@ impl VTable for ByteBoolVTable {
 
     fn encoding(_array: &Self::Array) -> EncodingRef {
         EncodingRef::new_ref(ByteBoolEncoding.as_ref())
+    }
+
+    fn plan_range_read(
+        _metadata: &EmptyMetadata,
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+    ) -> Option<EncodingRangeRead> {
+        Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![BufferSubRange::Range(row_range.start..row_range.end)],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Leaf {
+                decode_len: row_range.len(),
+                post_slice: None,
+            },
+        })
     }
 }
 

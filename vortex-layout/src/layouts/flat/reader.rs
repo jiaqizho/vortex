@@ -17,7 +17,7 @@ use vortex_mask::Mask;
 
 use crate::LayoutReader;
 use crate::layouts::SharedArrayFuture;
-use crate::layouts::flat::FlatLayout;
+use crate::layouts::flat::{FlatLayout, range_read};
 use crate::segments::SegmentSource;
 
 /// The threshold of mask density below which we will evaluate the expression only over the
@@ -44,6 +44,32 @@ impl FlatReader {
             name,
             segment_source,
         }
+    }
+
+    /// Try to build a range-read array future for the given row range.
+    /// Returns `None` if range read is not possible (fallback to full read).
+    fn try_range_read_array(&self, row_range: &Range<usize>) -> Option<SharedArrayFuture> {
+        let array_tree = self.layout.array_tree.as_ref()?;
+        let row_count = usize::try_from(self.layout.row_count()).ok()?;
+        let ctx = self.layout.array_ctx();
+
+        let plan = range_read::try_plan_range_read(
+            array_tree,
+            row_range.clone(),
+            row_count,
+            self.layout.dtype(),
+            ctx,
+        )
+        .ok()??;
+
+        Some(range_read::execute_range_read(
+            plan,
+            array_tree.clone(),
+            self.layout.segment_id(),
+            self.segment_source.clone(),
+            self.layout.dtype().clone(),
+            ctx.clone(),
+        ))
     }
 
     /// Register the segment request and return a future that would resolve into the deserialised array.
@@ -111,18 +137,20 @@ impl LayoutReader for FlatReader {
             ..usize::try_from(row_range.end)
                 .vortex_expect("Row range end must fit within FlatLayout size");
         let name = self.name.clone();
-        let array = self.array_future();
+
+        // Try range read first; fall back to full read.
+        let (array, already_sliced) = match self.try_range_read_array(&row_range) {
+            Some(fut) => (fut, true),
+            None => (self.array_future(), false),
+        };
         let expr = expr.clone();
 
         Ok(MaskFuture::new(mask.len(), async move {
-            // TODO(ngates): if the mask density is low enough, or if the mask is dense within a range
-            //  (as often happens with zone map pruning), then we could slice/filter the array prior
-            //  to evaluating the expression.
             let mut array = array.clone().await?;
             let mask = mask.await?;
 
-            // Slice the array based on the row mask.
-            if row_range.start > 0 || row_range.end < array.len() {
+            // Slice the array based on the row mask (skip if range read already sliced).
+            if !already_sliced && (row_range.start > 0 || row_range.end < array.len()) {
                 array = array.slice(row_range.clone());
             }
 
@@ -169,7 +197,12 @@ impl LayoutReader for FlatReader {
             ..usize::try_from(row_range.end)
                 .vortex_expect("Row range end must fit within FlatLayout size");
         let name = self.name.clone();
-        let array = self.array_future();
+
+        // Try range read first; fall back to full read.
+        let (array, already_sliced) = match self.try_range_read_array(&row_range) {
+            Some(fut) => (fut, true),
+            None => (self.array_future(), false),
+        };
         let expr = expr.clone();
 
         Ok(async move {
@@ -178,8 +211,8 @@ impl LayoutReader for FlatReader {
             let mut array = array.clone().await?;
             let mask = mask.await?;
 
-            // Slice the array based on the row mask.
-            if row_range.start > 0 || row_range.end < array.len() {
+            // Slice the array based on the row mask (skip if range read already sliced).
+            if !already_sliced && (row_range.start > 0 || row_range.end < array.len()) {
                 array = array.slice(row_range.clone());
             }
 

@@ -134,4 +134,17 @@ impl SegmentSource for SegmentCacheSourceAdapter {
         }
         .boxed()
     }
+
+    fn request_range(&self, id: SegmentId, range: std::ops::Range<usize>) -> SegmentFuture {
+        let cache = self.cache.clone();
+        let source = self.source.clone();
+        async move {
+            if let Ok(Some(buffer)) = cache.get(id).await {
+                Ok(buffer.slice_unaligned(range))
+            } else {
+                source.request_range(id, range).await
+            }
+        }
+        .boxed()
+    }
 }
