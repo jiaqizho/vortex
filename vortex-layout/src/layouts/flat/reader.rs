@@ -18,7 +18,6 @@ use vortex_array::serde::SerializedArray;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_mask::Mask;
-use vortex_session::SessionExt;
 use vortex_session::VortexSession;
 
 use crate::layouts::SharedArrayFuture;
@@ -94,7 +93,12 @@ impl FlatReader {
         &self,
         row_range: Range<usize>,
     ) -> VortexResult<Option<SharedArrayFuture>> {
-        if !self.session.get::<RangeReadEnabled>().0 {
+        // This optional flag defaults to enabled without mutating the immutable session.
+        if self
+            .session
+            .get_opt::<RangeReadEnabled>()
+            .is_some_and(|enabled| !enabled.0)
+        {
             return Ok(None);
         }
 

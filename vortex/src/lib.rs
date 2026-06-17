@@ -7,6 +7,7 @@
 // vortex::compute is deprecated and will be ported over to expressions.
 pub use vortex_array::aggregate_fn;
 use vortex_array::aggregate_fn::session::AggregateFnSession;
+use vortex_array::arrow::ArrowSession;
 pub use vortex_array::compute;
 use vortex_array::dtype::session::DTypeSession;
 // vortex::expr is in the process of having its dependencies inverted, and will eventually be
@@ -172,11 +173,18 @@ impl VortexSessionDefault for VortexSession {
             .with::<StatsSession>()
             .with::<ArrayKernels>()
             .with::<AggregateFnSession>()
+            .with::<ArrowSession>()
             .with::<MemorySession>()
             .with::<RuntimeSession>();
 
         #[cfg(feature = "files")]
-        file::register_default_encodings(&session);
+        let session = {
+            // Moka's cache clock is unavailable on wasm; encoding registration is still needed.
+            #[cfg(not(target_arch = "wasm32"))]
+            let session = session.with::<file::multi::MultiFileSession>();
+            file::register_default_encodings(&session);
+            session
+        };
 
         session
     }
@@ -192,7 +200,9 @@ mod test {
     use vortex_array::ArrayRef;
     use vortex_array::IntoArray;
     use vortex_array::LEGACY_SESSION;
+    use vortex_array::VTable as _;
     use vortex_array::VortexSessionExecute;
+    use vortex_array::arrays::ListArray;
     use vortex_array::arrays::PrimitiveArray;
     use vortex_array::arrays::StructArray;
     use vortex_array::dtype::FieldNames;
@@ -200,18 +210,86 @@ mod test {
     use vortex_array::expr::lit;
     use vortex_array::expr::root;
     use vortex_array::expr::select;
+    use vortex_array::expr::stats::Stat;
+    use vortex_array::session::ArraySessionExt;
     use vortex_array::stream::ArrayStreamExt;
     use vortex_array::validity::Validity;
     use vortex_btrblocks::BtrBlocksCompressorBuilder;
+    use vortex_buffer::ByteBuffer;
     use vortex_buffer::buffer;
+    use vortex_bytebool::ByteBool;
     use vortex_error::VortexResult;
     use vortex_file::OpenOptionsSessionExt;
     use vortex_file::WriteOptionsSessionExt;
     use vortex_file::WriteStrategyBuilder;
+    use vortex_io::runtime::BlockingRuntime;
+    use vortex_io::runtime::tokio::TokioRuntime;
+    use vortex_io::session::RuntimeSessionExt;
     use vortex_session::VortexSession;
 
     use crate as vortex;
     use crate::VortexSessionDefault;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cold_session_finishes_nullable_list_writer() -> VortexResult<()> {
+        let session = VortexSession::default();
+        let list = ListArray::try_new(
+            PrimitiveArray::from_iter([11i32, 12]).into_array(),
+            PrimitiveArray::from_iter([0u32, 0, 2]).into_array(),
+            Validity::from_iter([false, true]),
+        )?
+        .into_array();
+        let array = StructArray::from_fields(&[("items", list)])?.into_array();
+
+        let mut bytes = Vec::new();
+        let mut writer = session
+            .write_options()
+            .with_file_statistics(vec![Stat::UncompressedSizeInBytes])
+            .writer(&mut bytes, array.dtype().clone());
+        writer.push(array.clone()).await?;
+        writer.finish().await?;
+
+        let actual = session
+            .open_options()
+            .open_buffer(ByteBuffer::from(bytes))?
+            .scan()?
+            .into_array_stream()?
+            .read_all()
+            .await?;
+        vortex_array::assert_arrays_eq!(array, actual);
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_rebinding_preserves_source_and_registered_encodings() -> VortexResult<()> {
+        let source_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("source-runtime")
+            .enable_all()
+            .build()?;
+        let derived_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("derived-runtime")
+            .enable_all()
+            .build()?;
+        let source_handle = TokioRuntime::new(source_runtime.handle().clone());
+        let derived_handle = TokioRuntime::new(derived_runtime.handle().clone());
+        let source = vortex_array::array_session().with_handle(source_handle.handle());
+        source.arrays().register(ByteBool);
+        let derived = source.clone().with_handle(derived_handle.handle());
+
+        for (session, expected) in [(&source, "source-runtime"), (&derived, "derived-runtime")] {
+            let actual = source_runtime.block_on(session.handle().spawn(async {
+                std::thread::current()
+                    .name()
+                    .unwrap_or("unnamed")
+                    .to_owned()
+            }));
+            assert_eq!(actual, expected);
+            assert!(session.arrays().registry().find(&ByteBool.id()).is_some());
+        }
+        Ok(())
+    }
 
     #[test]
     fn convert() -> anyhow::Result<()> {

@@ -23,7 +23,6 @@ use vortex_buffer::ByteBuffer;
 use vortex_error::VortexResult;
 use vortex_error::vortex_err;
 use vortex_flatbuffers::array as fba;
-use vortex_session::SessionExt;
 use vortex_session::VortexSession;
 use vortex_session::registry::ReadContext;
 
@@ -623,7 +622,11 @@ pub(super) fn try_plan_range_read(
         });
     }
 
-    if !validity_reads.is_empty() && !session.get::<SeparateValidityReadsEnabled>().0 {
+    if !validity_reads.is_empty()
+        && !session
+            .get_opt::<SeparateValidityReadsEnabled>()
+            .is_some_and(|enabled| enabled.0)
+    {
         return Ok(None);
     }
 

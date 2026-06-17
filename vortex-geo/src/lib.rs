@@ -57,7 +57,6 @@ mod tests {
     use vortex_array::dtype::Nullability;
     use vortex_array::dtype::extension::ExtDType;
     use vortex_array::dtype::extension::ExtVTable;
-    use vortex_array::session::ArraySession;
     use vortex_error::VortexResult;
     use vortex_error::vortex_err;
     use vortex_session::VortexSession;
@@ -67,7 +66,7 @@ mod tests {
     use crate::extension::WellKnownBinary;
 
     static SESSION: LazyLock<VortexSession> = LazyLock::new(|| {
-        let session = VortexSession::empty().with::<ArraySession>();
+        let session = vortex_array::array_session();
         crate::initialize(&session);
         session
     });

@@ -380,13 +380,10 @@ mod tests {
     use futures::future::BoxFuture;
     use vortex_array::IntoArray;
     use vortex_array::buffer::BufferHandle;
-    use vortex_array::dtype::session::DTypeSession;
     use vortex_array::memory::DefaultHostAllocator;
     use vortex_array::memory::HostAllocator;
     use vortex_array::memory::MemorySessionExt;
     use vortex_array::memory::WritableHostBuffer;
-    use vortex_array::scalar_fn::session::ScalarFnSession;
-    use vortex_array::session::ArraySession;
     use vortex_buffer::Alignment;
     use vortex_buffer::Buffer;
     use vortex_buffer::ByteBuffer;
@@ -445,11 +442,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_initial_read_size() {
-        let session = VortexSession::empty()
-            .with::<DTypeSession>()
-            .with::<ArraySession>()
+        let session = vortex_array::array_session()
             .with::<LayoutSession>()
-            .with::<ScalarFnSession>()
             .with::<RuntimeSession>();
 
         crate::register_default_encodings(&session);
@@ -502,11 +496,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_initial_read_cache_can_be_disabled() -> VortexResult<()> {
-        let session = VortexSession::empty()
-            .with::<DTypeSession>()
-            .with::<ArraySession>()
+        let session = vortex_array::array_session()
             .with::<LayoutSession>()
-            .with::<ScalarFnSession>()
             .with::<RuntimeSession>();
 
         crate::register_default_encodings(&session);
@@ -555,11 +546,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn test_open_path_uses_memory_session_allocator() {
-        let session = VortexSession::empty()
-            .with::<DTypeSession>()
-            .with::<ArraySession>()
+        let session = vortex_array::array_session()
             .with::<LayoutSession>()
-            .with::<ScalarFnSession>()
             .with::<RuntimeSession>();
 
         crate::register_default_encodings(&session);
@@ -579,11 +567,9 @@ mod tests {
         std::fs::write(&file_path, ByteBuffer::from(buf).as_slice()).unwrap();
 
         let allocations = Arc::new(AtomicUsize::new(0));
-        session
-            .memory_mut()
-            .set_allocator(Arc::new(CountingAllocator {
-                allocations: Arc::clone(&allocations),
-            }));
+        let session = session.with_allocator(Arc::new(CountingAllocator {
+            allocations: Arc::clone(&allocations),
+        }));
 
         let _file = session.open_options().open_path(&file_path).await.unwrap();
         std::fs::remove_file(&file_path).unwrap();

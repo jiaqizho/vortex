@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
+pub use session::MultiFileSession;
 use session::MultiFileSessionExt;
 use tracing::debug;
 use vortex_error::VortexResult;

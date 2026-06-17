@@ -1250,7 +1250,6 @@ mod tests {
     use vortex::error::VortexResult;
     use vortex::error::vortex_bail;
     use vortex::extension::datetime::TimeUnit;
-    use vortex::session::VortexSession;
 
     use crate::CudaExecutionCtx;
     use crate::arrow::ARROW_DEVICE_CUDA;
@@ -1585,7 +1584,7 @@ mod tests {
         #[case] expected_len: i64,
         #[case] expected_data_type: DataType,
     ) -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut exported = array.export_device_array_with_schema(&mut ctx).await?;
@@ -1606,7 +1605,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_null() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = NullArray::new(7).into_array();
@@ -1622,7 +1621,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_dictionary() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let out_of_line = "a dictionary value stored out-of-line";
@@ -1667,7 +1666,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_struct_preserves_dictionary_child() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let dictionary = DictArray::try_new(
@@ -1709,7 +1708,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_dictionary_with_nullable_values() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = DictArray::try_new(
@@ -1746,7 +1745,7 @@ mod tests {
         expected_data_type: DataType,
         expected_values: Vec<T>,
     ) -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut exported = array.export_device_array_with_schema(&mut ctx).await?;
@@ -1876,7 +1875,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_decimal_narrowing_errors() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
         let array = DecimalArray::from_iter([i256::from_parts(0, 1)], DecimalDType::new(38, 0))
             .into_array();
@@ -1891,7 +1890,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_decimal_narrowing_from_arrow_import() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
         let array = DecimalArray::from_iter([0i128, 1, -2], DecimalDType::new(10, 2)).into_array();
 
@@ -1934,7 +1933,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_temporal() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = TemporalArray::new_date(
@@ -1957,7 +1956,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_bool() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = BoolArray::from_iter([true, false, true]).into_array();
@@ -1976,7 +1975,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_varbinview() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let out_of_line = "this is a longer string for out-of-line storage";
@@ -1992,7 +1991,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_binary_inline_outline_values() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let out_of_line = b"this binary payload is longer than twelve bytes";
@@ -2023,7 +2022,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_binary_empty_and_all_null() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let empty = VarBinViewArray::from_iter_nullable_bin(std::iter::empty::<Option<&[u8]>>())
@@ -2049,7 +2048,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_binary_invalid_data_buffer_ref_errors() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let view = BinaryView::make_view(b"this references a missing data buffer", 0, 0);
@@ -2075,7 +2074,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_binary_i32_offset_overflow_errors() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let view = BinaryView::new_ref(i32::MAX as u32 + 1, [0; 4], 0, 0);
@@ -2101,7 +2100,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_list() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = ListArray::try_new(
@@ -2140,7 +2139,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_host_contiguous_list_view() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = ListViewArray::new(
@@ -2167,7 +2166,7 @@ mod tests {
     #[crate::test]
     async fn test_export_host_non_contiguous_nested_list_view_falls_back_to_cpu() -> VortexResult<()>
     {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let elements = StructArray::new(
@@ -2209,7 +2208,7 @@ mod tests {
     #[crate::test]
     async fn test_export_host_non_contiguous_dictionary_list_view_schema_matches_rebuilt_child()
     -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let elements = DictArray::try_new(
@@ -2267,7 +2266,7 @@ mod tests {
     #[crate::test]
     async fn test_export_host_large_lists_dictionary_list_view_schema_matches_rebuilt_child()
     -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let elements = DictArray::try_new(
@@ -2320,7 +2319,7 @@ mod tests {
         #[case] offsets_ptype: PType,
         #[case] sizes_ptype: PType,
     ) -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let elements = primitive_i32_on_device(0..5, &mut ctx).await?;
@@ -2365,7 +2364,7 @@ mod tests {
         #[case] fixture: (ArrayRef, [usize; 2]),
         #[case] expected_data_type: DataType,
     ) -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let (array, expected_data_buffer_lengths) = fixture;
@@ -2396,7 +2395,7 @@ mod tests {
     #[case::u64(PrimitiveArray::from_iter([0u64, 2, 2, 5]).into_array())]
     #[crate::test]
     async fn test_export_list_with_non_i32_offsets(#[case] offsets: ArrayRef) -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = ListArray::try_new(
@@ -2428,7 +2427,7 @@ mod tests {
         #[case] offsets_ptype: PType,
         #[case] sizes_ptype: PType,
     ) -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let elements = primitive_i32_on_device([10, 11, 12, 13, 14], &mut ctx).await?;
@@ -2457,7 +2456,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_device_non_contiguous_dictionary_list_view() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let codes = primitive_on_device([0u8, 1, 2, 0, 1], &mut ctx).await?;
@@ -2505,7 +2504,7 @@ mod tests {
     #[crate::test]
     async fn test_export_device_non_contiguous_dictionary_list_view_nullable_values()
     -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let codes = primitive_on_device([0u8, 1, 2, 0, 1], &mut ctx).await?;
@@ -2534,7 +2533,7 @@ mod tests {
     #[crate::test]
     async fn test_export_device_non_contiguous_dictionary_list_view_nullable_codes_errors()
     -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let codes = PrimitiveArray::from_option_iter([Some(0u8), None, Some(2), Some(0), Some(1)]);
@@ -2572,7 +2571,7 @@ mod tests {
         #[case] sizes_values: &[i64],
         #[case] expected_error: &str,
     ) -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let elements = primitive_i32_on_device(0..4, &mut ctx).await?;
@@ -2600,7 +2599,7 @@ mod tests {
     #[crate::test]
     async fn test_export_device_non_contiguous_nested_list_view_returns_error() -> VortexResult<()>
     {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let field = primitive_i32_on_device(0..4, &mut ctx).await?;
@@ -2634,7 +2633,7 @@ mod tests {
     #[crate::test]
     async fn test_export_device_non_contiguous_nullable_primitive_list_view_returns_error()
     -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let elements = nullable_primitive_i32_on_device(
@@ -2664,7 +2663,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_fixed_size_list_as_list() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = FixedSizeListArray::new(
@@ -2709,7 +2708,7 @@ mod tests {
     // Check device metadata for data-bearing and metadata-only exports.
     #[crate::test]
     async fn test_export_device_metadata() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
         let expected_device_id = ctx.stream().context().ordinal() as i64;
 
@@ -2731,7 +2730,7 @@ mod tests {
     // Check sliced arrays preserve the expected Arrow length/offset metadata.
     #[crate::test]
     async fn test_export_sliced_arrays() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let primitive = PrimitiveArray::from_iter(0u32..10)
@@ -2757,7 +2756,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_sliced_varbinview_arrays() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let utf8 = VarBinViewArray::from_iter_nullable_str([
@@ -2822,7 +2821,7 @@ mod tests {
         #[case] arrow_offset: usize,
         #[case] len: usize,
     ) -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let logical_bits = (0..len).map(|idx| idx % 3 != 0).collect::<Vec<_>>();
@@ -2855,7 +2854,7 @@ mod tests {
 
     #[crate::test]
     async fn test_repack_arrow_validity_buffer_zeroes_padding() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let len = 9;
@@ -2885,7 +2884,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_all_false_validity_buffer_is_zeroed_on_device() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let len = 4;
@@ -2911,7 +2910,7 @@ mod tests {
     // Check nullable primitives export Arrow null bitmaps on device.
     #[crate::test]
     async fn test_export_nullable_primitive() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut primitive = assert_nullable_export(
@@ -2938,7 +2937,7 @@ mod tests {
     // Check nullable bool exports preserve Arrow offset metadata.
     #[crate::test]
     async fn test_export_nullable_bool() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut bools = assert_nullable_export(
@@ -2959,7 +2958,7 @@ mod tests {
     // Check synthesized all-null bool validity is large enough for Arrow offset-based reads.
     #[crate::test]
     async fn test_export_all_null_sliced_bool_validity_covers_arrow_offset() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut bools = assert_nullable_export(
@@ -2985,7 +2984,7 @@ mod tests {
     // Check nullable decimal exports include Arrow null bitmaps.
     #[crate::test]
     async fn test_export_nullable_decimal() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut decimal = assert_nullable_export(
@@ -3015,7 +3014,7 @@ mod tests {
     // Check nullable temporal exports include Arrow null bitmaps.
     #[crate::test]
     async fn test_export_nullable_temporal() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut temporal = assert_nullable_export(
@@ -3037,7 +3036,7 @@ mod tests {
     // Check nullable string-view exports include Arrow null bitmaps.
     #[crate::test]
     async fn test_export_nullable_varbinview() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut varbinview = assert_nullable_export(
@@ -3060,7 +3059,7 @@ mod tests {
     // Check nullable struct exports include Arrow null bitmaps.
     #[crate::test]
     async fn test_export_nullable_struct() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut struct_array = assert_nullable_export(
@@ -3084,7 +3083,7 @@ mod tests {
     // Check nested struct children expose cuDF-compatible Arrow Device layouts.
     #[crate::test]
     async fn test_export_nested_struct_child_layout() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut device_array = nested_struct_array().export_device_array(&mut ctx).await?;
@@ -3137,7 +3136,7 @@ mod tests {
     // Check parent release recursively releases children and is safe to repeat.
     #[crate::test]
     async fn test_release_is_idempotent_and_releases_children() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut device_array = nested_struct_array().export_device_array(&mut ctx).await?;
@@ -3185,7 +3184,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_struct() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = StructArray::new(
@@ -3214,7 +3213,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_struct_with_schema() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = StructArray::new(
@@ -3252,7 +3251,7 @@ mod tests {
     // Check nested struct device exports carry the matching Arrow schema.
     #[crate::test]
     async fn test_export_nested_struct_with_schema() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let mut exported = nested_struct_array()
@@ -3284,7 +3283,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_nested_struct_decimal_with_schema() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let nested = StructArray::new(
@@ -3345,7 +3344,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_primitive_with_schema_is_column_shaped() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let array = PrimitiveArray::from_iter(0u32..5).into_array();
@@ -3364,7 +3363,7 @@ mod tests {
 
     #[crate::test]
     async fn test_export_varbinview_with_schema_uses_utf8_view_layout() -> VortexResult<()> {
-        let mut ctx = CudaSession::create_execution_ctx(&VortexSession::empty())
+        let mut ctx = CudaSession::create_execution_ctx(&crate::cuda_session())
             .vortex_expect("failed to create execution context");
 
         let japanese = "こんにちは";

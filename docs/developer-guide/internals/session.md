@@ -5,21 +5,23 @@ ecosystem. Each major component of Vortex defines its own session variable type 
 registry of plugins. There is typically one session per process, and it is passed explicitly
 through the API rather than relying on global or thread-local state.
 
-Plugins are themselves also able to register state in the session, for example to hold caches
-or other shared resources.
+Plugins can add state while constructing the session, for example to hold caches or other
+shared resources.
 
 ## Design
 
 The session is built on two primitives from the `vortex-session` crate:
 
 - **`VortexSession`** -- a cloneable, thread-safe map from Rust `TypeId` to a boxed value. Any
-  type that is `Send + Sync + Debug + 'static` can be stored as a session variable.
+  type implementing `SessionVar` and `Clone` can be stored as a session variable.
 - **`Registry<T>`** -- a concurrent map from string IDs to values of type `T`, used by each
   component to look up registered plugins at runtime.
 
-Because `VortexSession` is backed by an `Arc<DashMap>`, cloning is cheap and all clones share
-the same state. This makes it safe to hand the session to multiple threads, tasks, or I/O
-operations without coordination.
+`VortexSession` is backed by an immutable `Arc<HashMap>`, so cloning is cheap and reading
+components takes no session-map lock. Its set of components is fixed after construction.
+To change configuration, use `to_builder()` and build a new session. Configuration fields
+belong to the new session, while registries and caches can retain shared backing storage
+according to their `Clone` implementations.
 
 ## Component Registries
 
@@ -34,10 +36,10 @@ Each Vortex crate defines a session variable that holds a registry for its exten
 | `RuntimeSession`  | `vortex-io`      | Async runtime handle                         |
 | `CudaSession`     | `vortex-cuda`    | CUDA context, kernels, and stream pool       |
 
-Session variables are created lazily on first access with their `Default` implementation, which
-registers the built-in plugins for that component. For example, `ArraySession::default()`
-registers the 14 built-in encodings (Null, Bool, Primitive, Struct, etc.), and
-`LayoutSession::default()` registers the 5 built-in layouts (Flat, Struct, Chunked, Zoned, Dict).
+Register required session variables before building a session. Their `Default` implementations
+register the built-in plugins for each component. `get()` panics if a component is missing;
+`get_opt()` returns `None` and does not initialize it. Mutable plugin registries inside existing
+components still support registration after the session has been built.
 
 ## Registering Plugins
 
@@ -82,9 +84,9 @@ ScanBuilder::new(session.clone(), layout_reader)
 ```
 
 Many APIs use extension traits to provide ergonomic methods directly on the session. For example,
-`OpenOptionsSessionExt` adds `.open_options()` to any session that has `ArraySession`,
-`LayoutSession`, and `RuntimeSession` registered. This lets the type system enforce that the
-required components are present.
+`OpenOptionsSessionExt` adds `.open_options()`. Required components such as `ArraySession`,
+`LayoutSession`, and `RuntimeSession` must be registered when constructing the session;
+extension traits do not statically enforce their presence.
 
 ## Constructing a Session
 
@@ -95,13 +97,17 @@ all built-in components and encodings:
 let session = VortexSession::default();
 ```
 
-For tests or specialized use-cases, sessions can be assembled from individual components using
-the `.with::<T>()` builder:
+For tests or specialized use-cases, start with the standard array components and add layout
+and runtime state using the builder:
 
 ```rust
-let session = VortexSession::empty()
-    .with::<ArraySession>()
+let session = vortex_array::array_session()
+    .to_builder()
     .with::<LayoutSession>()
-    .with::<ScalarFnSession>()
-    .with::<RuntimeSession>();
+    .with::<RuntimeSession>()
+    .build();
 ```
+
+For array execution, `vortex_array::array_session()` supplies the standard array, dtype,
+function, optimizer, Arrow conversion, and memory components. Add layout and runtime state
+when using it for file operations.

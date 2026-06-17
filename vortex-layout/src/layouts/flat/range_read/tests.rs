@@ -32,9 +32,7 @@ use vortex_array::dtype::Nullability;
 use vortex_array::expr::root;
 use vortex_array::expr::stats::Stat;
 use vortex_array::extension::datetime::TimeUnit;
-use vortex_array::scalar_fn::session::ScalarFnSession;
 use vortex_array::serde::SerializeOptions;
-use vortex_array::session::ArraySession;
 use vortex_array::session::ArraySessionExt;
 use vortex_array::validity::Validity;
 use vortex_buffer::Alignment;
@@ -53,7 +51,6 @@ use vortex_fastlanes::delta_compress;
 use vortex_io::runtime::single::block_on;
 use vortex_io::session::RuntimeSession;
 use vortex_sequence::Sequence;
-use vortex_session::SessionExt;
 use vortex_session::VortexSession;
 use vortex_session::registry::ReadContext;
 use vortex_zigzag::ZigZag;
@@ -117,10 +114,8 @@ struct WrittenArray {
 }
 
 fn test_session() -> VortexSession {
-    let session = VortexSession::empty()
-        .with::<ArraySession>()
+    let session = vortex_array::array_session()
         .with::<LayoutSession>()
-        .with::<ScalarFnSession>()
         .with::<RuntimeSession>();
     session.arrays().register(ByteBool);
     session.arrays().register(ALP);
@@ -136,9 +131,9 @@ fn test_session() -> VortexSession {
 }
 
 fn test_session_with_separate_validity_reads() -> VortexSession {
-    let session = test_session();
-    session.get_mut::<SeparateValidityReadsEnabled>().0 = true;
-    session
+    let mut builder = test_session().to_builder();
+    builder.get_mut::<SeparateValidityReadsEnabled>().0 = true;
+    builder.build()
 }
 
 fn write_array(array: &ArrayRef, session: &VortexSession) -> VortexResult<WrittenArray> {
@@ -637,6 +632,22 @@ fn sequence_preserves_absolute_row_values_without_segment_io() -> VortexResult<(
 }
 
 #[test]
+fn range_read_configuration_does_not_mutate_source_session() -> VortexResult<()> {
+    let source_session = test_session();
+    let mut builder = source_session.to_builder();
+    builder.get_mut::<RangeReadEnabled>().0 = false;
+    let disabled_session = builder.build();
+
+    let array = PrimitiveArray::from_iter(0..4096i32).into_array();
+    let (actual, source, _) = read_range(&array, 100..101, disabled_session, true)?;
+    assert_arrays_eq!(actual, array.slice(100..101)?);
+    assert_eq!(source.full_requests(), 1);
+    assert!(source.ranges().is_empty());
+    assert_range_read(&array, 100..101, source_session)?;
+    Ok(())
+}
+
+#[test]
 fn unsupported_and_disabled_paths_fall_back_to_full_segment() -> VortexResult<()> {
     let mut values = vec![0u32; 4096];
     values[2000] = 100;
@@ -652,8 +663,9 @@ fn unsupported_and_disabled_paths_fall_back_to_full_segment() -> VortexResult<()
     assert!(source.ranges().is_empty());
 
     let primitive = PrimitiveArray::from_iter(0..4096i32).into_array();
-    let disabled_session = test_session();
-    disabled_session.get_mut::<RangeReadEnabled>().0 = false;
+    let mut builder = test_session().to_builder();
+    builder.get_mut::<RangeReadEnabled>().0 = false;
+    let disabled_session = builder.build();
     let (_, source, _) = read_range(&primitive, 100..101, disabled_session, true)?;
     assert_eq!(source.full_requests(), 1);
     assert!(source.ranges().is_empty());
