@@ -156,4 +156,56 @@ impl SegmentSource for SegmentCacheSourceAdapter {
         }
         .boxed()
     }
+
+    fn request_range(&self, id: SegmentId, range: std::ops::Range<usize>) -> SegmentFuture {
+        let cache = Arc::clone(&self.cache);
+        let delegate = self.source.request_range(id, range.clone());
+
+        async move {
+            if let Ok(Some(segment)) = cache.get(id).await {
+                if range.start > range.end || range.end > segment.len() {
+                    vortex_error::vortex_bail!(
+                        "Segment {} range {}..{} out of bounds for cached buffer of length {}",
+                        id,
+                        range.start,
+                        range.end,
+                        segment.len()
+                    );
+                }
+                tracing::debug!("Resolved segment {} range {:?} from cache", id, range);
+                return Ok(BufferHandle::new_host(segment.slice_unaligned(range)));
+            }
+            delegate.await
+        }
+        .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vortex_buffer::Alignment;
+    use vortex_error::vortex_err;
+
+    use super::*;
+    use crate::segments::TestSegments;
+
+    #[tokio::test]
+    async fn cached_range_request_is_unaligned_zero_copy() -> VortexResult<()> {
+        let segment = ByteBuffer::copy_from_aligned([0, 1, 2, 3, 4, 5, 6, 7], Alignment::new(8));
+        let expected_ptr = segment.as_ptr().wrapping_add(4);
+        let cache = Arc::new(MokaSegmentCache::new(1024));
+        let id = SegmentId::from(0);
+        cache.put(id, segment).await?;
+        let source = SegmentCacheSourceAdapter::new(cache, Arc::new(TestSegments::default()));
+
+        let result = source.request_range(id, 4..8).await?;
+        let result = result
+            .as_host_opt()
+            .ok_or_else(|| vortex_err!("expected host buffer"))?;
+
+        assert_eq!(result.as_ref(), &[4, 5, 6, 7]);
+        assert_eq!(result.alignment(), Alignment::none());
+        assert_eq!(result.as_ptr(), expected_ptr);
+        Ok(())
+    }
 }

@@ -24,6 +24,7 @@ mod operations;
 mod validity;
 
 use std::hash::Hasher;
+use std::ops::Range;
 
 use vortex_buffer::Alignment;
 use vortex_session::VortexSession;
@@ -31,6 +32,10 @@ use vortex_session::registry::CachedId;
 
 use crate::EqMode;
 use crate::array::ArrayId;
+use crate::array::BufferSubRange;
+use crate::array::EncodingRangeRead;
+use crate::array::RangeDecodeInfo;
+use crate::array::ValidityRangeRead;
 use crate::arrays::primitive::array::SLOT_NAMES;
 use crate::arrays::primitive::compute::rules::RULES;
 use crate::hash::ArrayEq;
@@ -199,6 +204,33 @@ impl VTable for Primitive {
         ctx: &mut ExecutionCtx,
     ) -> VortexResult<Option<ArrayRef>> {
         PARENT_KERNELS.execute(array, parent, child_idx, ctx)
+    }
+
+    fn plan_range_read(
+        &self,
+        _metadata: &[u8],
+        row_range: Range<usize>,
+        _row_count: usize,
+        dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        let byte_width = match dtype {
+            DType::Primitive(ptype, _) => ptype.byte_width(),
+            _ => return Ok(None),
+        };
+        let Some(byte_start) = row_range.start.checked_mul(byte_width) else {
+            return Ok(None);
+        };
+        let Some(byte_end) = row_range.end.checked_mul(byte_width) else {
+            return Ok(None);
+        };
+
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![BufferSubRange::Range(byte_start..byte_end)],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Rows(row_range),
+            validity: ValidityRangeRead::Optional,
+        }))
     }
 }
 

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use std::hash::Hasher;
+use std::ops::Range;
 
 use kernel::PARENT_KERNELS;
 use prost::Message;
@@ -30,7 +31,11 @@ use crate::array::Array;
 use crate::array::ArrayId;
 use crate::array::ArrayParts;
 use crate::array::ArrayView;
+use crate::array::ChildRangeRead;
+use crate::array::EncodingRangeRead;
+use crate::array::RangeDecodeInfo;
 use crate::array::VTable;
+use crate::array::ValidityRangeRead;
 use crate::arrays::ConstantArray;
 use crate::arrays::Primitive;
 use crate::arrays::dict::DictArrayExt;
@@ -156,8 +161,10 @@ impl VTable for Dict {
             .unwrap_or_else(|| dtype.nullability());
         let codes_dtype = DType::Primitive(metadata.codes_ptype(), codes_nullable);
         let codes = children.get(0, &codes_dtype, len)?;
-        let values = children.get(1, dtype, metadata.values_len as usize)?;
-        let all_values_referenced = metadata.all_values_referenced.unwrap_or(false);
+        let values = children.get_full(1, dtype, metadata.values_len as usize)?;
+        // A partial decode can retain the full values array while decoding only a subset of codes.
+        let all_values_referenced =
+            !children.is_partial_decode() && metadata.all_values_referenced.unwrap_or(false);
 
         Ok(ArrayParts::new(self.clone(), dtype.clone(), len, unsafe {
             DictData::new_unchecked().set_all_values_referenced(all_values_referenced)
@@ -212,5 +219,38 @@ impl VTable for Dict {
         ctx: &mut ExecutionCtx,
     ) -> VortexResult<Option<ArrayRef>> {
         PARENT_KERNELS.execute(array, parent, child_idx, ctx)
+    }
+
+    fn plan_range_read(
+        &self,
+        metadata: &[u8],
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        let metadata = DictMetadata::decode(metadata)?;
+        let codes_nullability = metadata
+            .is_nullable_codes
+            .map(Nullability::from)
+            .unwrap_or_else(|| dtype.nullability());
+        let codes_dtype = DType::Primitive(metadata.codes_ptype(), codes_nullability);
+
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![
+                ChildRangeRead::Recurse {
+                    row_range,
+                    row_count,
+                    dtype: codes_dtype,
+                },
+                ChildRangeRead::Full,
+            ],
+            decode_info: RangeDecodeInfo::FromChild {
+                child_idx: 0,
+                divisor: 1,
+            },
+            validity: ValidityRangeRead::None,
+        }))
     }
 }

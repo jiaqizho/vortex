@@ -72,6 +72,8 @@ pub struct ScanBuilder<A> {
     /// The row-offset assigned to the first row of the file. Used by the `row_idx` expression,
     /// but not by the scan [`Selection`] which remains relative.
     row_offset: u64,
+    /// Whether sparse row indices may be merged into larger ranges.
+    split_row_indices: bool,
 }
 
 impl ScanBuilder<ArrayRef> {
@@ -93,6 +95,7 @@ impl ScanBuilder<ArrayRef> {
             file_stats: None,
             limit: None,
             row_offset: 0,
+            split_row_indices: true,
         }
     }
 
@@ -164,6 +167,17 @@ impl<A: 'static + Send> ScanBuilder<A> {
         self
     }
 
+    /// Control how `IncludeByIndex` selections are split into scan ranges.
+    ///
+    /// The default `true` uses the normal range-merging heuristic. When `false` and no explicit
+    /// row range is set, every selected index becomes its own one-row range, which maximizes
+    /// precision for direct point lookups. Scans with an explicit row range continue to use the
+    /// normal splitting strategy.
+    pub fn with_split_row_indices(mut self, split_row_indices: bool) -> Self {
+        self.split_row_indices = split_row_indices;
+        self
+    }
+
     pub fn with_split_by(mut self, split_by: SplitBy) -> Self {
         self.split_by = split_by;
         self
@@ -231,6 +245,7 @@ impl<A: 'static + Send> ScanBuilder<A> {
             file_stats: self.file_stats,
             limit: self.limit,
             row_offset: self.row_offset,
+            split_row_indices: self.split_row_indices,
             map_fn: Arc::new(move |a| old_map_fn(a).and_then(&map_fn)),
         }
     }
@@ -267,20 +282,25 @@ impl<A: 'static + Send> ScanBuilder<A> {
         let field_mask =
             referenced_field_masks(&projection, filter.as_ref(), layout_reader.dtype())?;
 
-        let splits =
-            if let Some(ranges) = attempt_split_ranges(&self.selection, self.row_range.as_ref()) {
-                Splits::Ranges(ranges)
-            } else {
-                let split_range = self
-                    .row_range
-                    .clone()
-                    .unwrap_or_else(|| 0..layout_reader.row_count());
-                Splits::Natural(self.split_by.splits(
-                    layout_reader.as_ref(),
-                    &split_range,
-                    &field_mask,
-                )?)
-            };
+        let splits = if !self.split_row_indices
+            && self.row_range.is_none()
+            && let Selection::IncludeByIndex(indices) = &self.selection
+        {
+            Splits::Ranges(indices.iter().map(|&idx| idx..idx + 1).collect())
+        } else if let Some(ranges) = attempt_split_ranges(&self.selection, self.row_range.as_ref())
+        {
+            Splits::Ranges(ranges)
+        } else {
+            let split_range = self
+                .row_range
+                .clone()
+                .unwrap_or_else(|| 0..layout_reader.row_count());
+            Splits::Natural(self.split_by.splits(
+                layout_reader.as_ref(),
+                &split_range,
+                &field_mask,
+            )?)
+        };
 
         Ok(RepeatedScan::new(
             self.session.clone(),
@@ -456,6 +476,7 @@ mod test {
     use vortex_array::expr::is_not_null;
     use vortex_array::expr::lit;
     use vortex_array::expr::root;
+    use vortex_buffer::Buffer;
     use vortex_error::VortexResult;
     use vortex_error::vortex_err;
     use vortex_io::runtime::BlockingRuntime;
@@ -722,6 +743,31 @@ mod test {
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert_eq!(values.as_ref(), [0, 1, 2, 3]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn disabled_row_index_splitting_creates_point_ranges() -> VortexResult<()> {
+        let mut ctx = LEGACY_SESSION.create_execution_ctx();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let reader = Arc::new(SplittingLayoutReader::new(Arc::clone(&calls)));
+        let runtime = SingleThreadRuntime::default();
+        let session = session_with_handle(runtime.handle());
+
+        let stream = ScanBuilder::new(session, reader)
+            .with_row_indices(Buffer::from_iter([0u64, 2, 3]))
+            .with_split_row_indices(false)
+            .into_stream()?;
+        let mut iter = runtime.block_on_stream(stream);
+        let mut values = Vec::new();
+        for chunk in &mut iter {
+            let primitive = chunk?.execute::<PrimitiveArray>(&mut ctx)?;
+            assert_eq!(primitive.len(), 1);
+            values.push(primitive.as_slice::<i32>()[0]);
+        }
+
+        assert_eq!(values, [0, 2, 3]);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
         Ok(())
     }
 

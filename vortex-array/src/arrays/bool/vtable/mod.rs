@@ -3,6 +3,7 @@
 
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Range;
 
 use kernel::PARENT_KERNELS;
 use prost::Message;
@@ -36,6 +37,10 @@ use vortex_session::registry::CachedId;
 
 use crate::EqMode;
 use crate::array::ArrayId;
+use crate::array::BufferSubRange;
+use crate::array::EncodingRangeRead;
+use crate::array::RangeDecodeInfo;
+use crate::array::ValidityRangeRead;
 use crate::arrays::bool::compute::rules::RULES;
 use crate::hash::ArrayEq;
 use crate::hash::ArrayHash;
@@ -189,6 +194,35 @@ impl VTable for Bool {
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         RULES.evaluate(array, parent, child_idx)
+    }
+
+    fn plan_range_read(
+        &self,
+        metadata: &[u8],
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        let metadata = BoolMetadata::decode(metadata)?;
+        let offset = metadata.offset as usize;
+        if offset >= 8 {
+            return Ok(None);
+        }
+
+        let decoded_start = row_range.start / 8 * 8;
+        let byte_start = decoded_start / 8;
+        let Some(physical_end) = offset.checked_add(row_range.end) else {
+            return Ok(None);
+        };
+        let byte_end = physical_end.div_ceil(8);
+
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![BufferSubRange::Range(byte_start..byte_end)],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Rows(decoded_start..row_range.end),
+            validity: ValidityRangeRead::Optional,
+        }))
     }
 }
 

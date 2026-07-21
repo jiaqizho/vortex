@@ -4,14 +4,17 @@
 //! This module contains the VTable definitions for a Vortex encoding.
 
 mod operations;
+mod range_read;
 mod validity;
 
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hasher;
+use std::ops::Range;
 
 pub use operations::*;
+pub use range_read::*;
 pub use validity::*;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
@@ -139,6 +142,22 @@ pub trait VTable: 'static + Clone + Sized + Send + Sync + Debug {
         children: &dyn ArrayChildren,
         session: &VortexSession,
     ) -> VortexResult<crate::array::ArrayParts<Self>>;
+
+    /// Plan the buffers and children required to decode a logical row range.
+    ///
+    /// Returning `None` indicates that this encoding or encoded instance cannot be safely read
+    /// from a sub-range. Callers must fall back to the full serialized segment.
+    fn plan_range_read(
+        &self,
+        metadata: &[u8],
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+        session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        _ = (metadata, row_range, row_count, dtype, session);
+        Ok(None)
+    }
 
     /// Writes the array into a canonical builder.
     fn append_to_builder(

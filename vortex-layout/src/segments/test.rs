@@ -26,6 +26,24 @@ pub struct TestSegments {
 }
 
 impl SegmentSource for TestSegments {
+    fn request_range(&self, id: SegmentId, range: std::ops::Range<usize>) -> SegmentFuture {
+        let buffer = self.segments.lock().get(*id as usize).cloned();
+        async move {
+            let buffer = buffer.ok_or_else(|| vortex_err!("Segment not found"))?;
+            if range.start > range.end || range.end > buffer.len() {
+                vortex_error::vortex_bail!(
+                    "Segment {} range {}..{} out of bounds for buffer of length {}",
+                    id,
+                    range.start,
+                    range.end,
+                    buffer.len()
+                );
+            }
+            Ok(BufferHandle::new_host(buffer.slice_unaligned(range)))
+        }
+        .boxed()
+    }
+
     fn request(&self, id: SegmentId) -> SegmentFuture {
         let buffer = self.segments.lock().get(*id as usize).cloned();
         async move {

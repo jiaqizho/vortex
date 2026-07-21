@@ -4,6 +4,7 @@
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::ops::Range;
 use std::sync::Arc;
 
 use vortex_error::VortexResult;
@@ -13,6 +14,7 @@ use crate::ArrayRef;
 use crate::IntoArray;
 use crate::array::Array;
 use crate::array::ArrayId;
+use crate::array::EncodingRangeRead;
 use crate::array::VTable;
 use crate::buffer::BufferHandle;
 use crate::dtype::DType;
@@ -55,6 +57,21 @@ pub trait ArrayPlugin: 'static + Send + Sync {
         children: &dyn ArrayChildren,
         session: &VortexSession,
     ) -> VortexResult<ArrayRef>;
+
+    /// Plan a sub-range read from serialized encoding metadata.
+    ///
+    /// Returning `None` requests the existing full-segment fallback.
+    fn plan_range_read(
+        &self,
+        metadata: &[u8],
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+        session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        _ = (metadata, row_range, row_count, dtype, session);
+        Ok(None)
+    }
 
     /// Can this plugin emit an array with the given encoding.
     ///
@@ -102,5 +119,16 @@ impl<V: VTable> ArrayPlugin for V {
             self, dtype, len, metadata, buffers, children, session,
         )?)?
         .into_array())
+    }
+
+    fn plan_range_read(
+        &self,
+        metadata: &[u8],
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+        session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        V::plan_range_read(self, metadata, row_range, row_count, dtype, session)
     }
 }

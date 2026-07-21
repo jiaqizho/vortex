@@ -5,6 +5,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Range;
 
 use num_traits::cast::FromPrimitive;
 use prost::Message;
@@ -36,8 +37,11 @@ use vortex_array::scalar::ScalarValue;
 use vortex_array::serde::ArrayChildren;
 use vortex_array::stats::StatsSet;
 use vortex_array::validity::Validity;
+use vortex_array::vtable::EncodingRangeRead;
 use vortex_array::vtable::OperationsVTable;
+use vortex_array::vtable::RangeDecodeInfo;
 use vortex_array::vtable::VTable;
+use vortex_array::vtable::ValidityRangeRead;
 use vortex_array::vtable::ValidityVTable;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
@@ -346,6 +350,22 @@ impl VTable for Sequence {
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         RULES.evaluate(array, parent, child_idx)
+    }
+
+    fn plan_range_read(
+        &self,
+        _metadata: &[u8],
+        _row_range: Range<usize>,
+        row_count: usize,
+        _dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Rows(0..row_count),
+            validity: ValidityRangeRead::None,
+        }))
     }
 }
 

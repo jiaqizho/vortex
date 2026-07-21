@@ -6,11 +6,14 @@
 //!
 //! This enables zero-cost backward compatibility with previously written datasets.
 
+use std::ops::Range;
+
 use vortex_array::Array;
 use vortex_array::ArrayId;
 use vortex_array::ArrayPlugin;
 use vortex_array::ArrayRef;
 use vortex_array::ArrayVTable;
+use vortex_array::EncodingRangeRead;
 use vortex_array::IntoArray;
 use vortex_array::VortexSessionExecute;
 use vortex_array::arrays::Patched;
@@ -78,6 +81,17 @@ impl ArrayPlugin for ALPPatchedPlugin {
         )?;
 
         Ok(patched.into_array())
+    }
+
+    fn plan_range_read(
+        &self,
+        metadata: &[u8],
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+        session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        ArrayVTable::plan_range_read(&ALP, metadata, row_range, row_count, dtype, session)
     }
 
     fn is_supported_encoding(&self, id: &ArrayId) -> bool {

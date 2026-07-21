@@ -39,6 +39,10 @@ use crate::sequence::SequencePointer;
 pub struct FlatLayoutStrategy {
     /// Whether to include padding for memory-mapped reads.
     pub include_padding: bool,
+    /// Whether to store the serialized array tree in the layout metadata.
+    ///
+    /// This enables planning sub-segment reads without first loading the segment.
+    pub inline_array_node: bool,
     /// Maximum length of variable length statistics
     pub max_variable_length_statistics_size: usize,
     /// Optional set of allowed array encodings for normalization.
@@ -50,6 +54,7 @@ impl Default for FlatLayoutStrategy {
     fn default() -> Self {
         Self {
             include_padding: true,
+            inline_array_node: false,
             max_variable_length_statistics_size: 64,
             allowed_encodings: None,
         }
@@ -60,6 +65,12 @@ impl FlatLayoutStrategy {
     /// Set whether to include padding for memory-mapped reads.
     pub fn with_include_padding(mut self, include_padding: bool) -> Self {
         self.include_padding = include_padding;
+        self
+    }
+
+    /// Set whether to store the serialized array tree in the layout metadata.
+    pub fn with_inline_array_node(mut self, inline_array_node: bool) -> Self {
+        self.inline_array_node = inline_array_node;
         self
     }
 
@@ -169,8 +180,8 @@ impl LayoutStrategy for FlatLayoutStrategy {
         )?;
         // there is at least the flatbuffer and the length
         assert!(buffers.len() >= 2);
-        let array_node =
-            flat_layout_inline_array_node().then(|| buffers[buffers.len() - 2].clone());
+        let array_node = (self.inline_array_node || flat_layout_inline_array_node())
+            .then(|| buffers[buffers.len() - 2].clone());
         let segment_id = segment_sink.write(sequence_id, buffers).await?;
 
         let None = stream.next().await else {
@@ -231,6 +242,7 @@ mod tests {
     use vortex_utils::aliases::hash_set::HashSet;
 
     use crate::LayoutStrategy;
+    use crate::layouts::flat::Flat;
     use crate::layouts::flat::writer::FlatLayoutStrategy;
     use crate::segments::TestSegments;
     use crate::sequence::SequenceId;
@@ -239,6 +251,30 @@ mod tests {
 
     // Currently, flat layouts do not force compute stats during write, they only retain
     // pre-computed stats.
+    #[test]
+    fn explicit_inline_array_node_configuration() -> VortexResult<()> {
+        block_on(|handle| async {
+            let session = SESSION.clone().with_handle(handle);
+            let segments = Arc::new(TestSegments::default());
+            let (ptr, eof) = SequenceId::root().split();
+            let array = PrimitiveArray::from_iter(0..16i32).into_array();
+
+            let layout = FlatLayoutStrategy::default()
+                .with_inline_array_node(true)
+                .write_stream(
+                    ArrayContext::empty(),
+                    segments,
+                    array.to_array_stream().sequenced(ptr),
+                    eof,
+                    &session,
+                )
+                .await?;
+
+            assert!(layout.as_::<Flat>().array_tree().is_some());
+            Ok(())
+        })
+    }
+
     #[should_panic]
     #[test]
     fn flat_stats() {
