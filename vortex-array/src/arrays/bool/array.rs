@@ -286,22 +286,28 @@ impl BoolData {
             bits.len() * 8,
         );
 
-        Ok(Self {
-            bits,
-            meta: BitBufferMeta::new(offset, len),
-        })
+        let meta = BitBufferMeta::new(offset, len);
+        let bits = if bits.len() == meta.byte_len() {
+            bits
+        } else {
+            bits.slice(0..meta.byte_len())
+        };
+
+        Ok(Self { bits, meta })
     }
 
     pub(super) unsafe fn new_unchecked(bits: BitBuffer, validity: Validity) -> Self {
-        if cfg!(debug_assertions) {
-            Self::try_new(bits, validity).vortex_expect("Failed to create BoolData")
-        } else {
-            let (offset, len, buffer) = bits.into_inner();
+        let bits = bits.shrink_offset();
 
-            Self {
-                bits: BufferHandle::new_host(buffer),
-                meta: BitBufferMeta::new(offset, len),
-            }
+        if cfg!(debug_assertions) {
+            Self::validate(&bits, &validity).vortex_expect("Failed to create BoolData");
+        }
+
+        let (offset, len, buffer) = bits.into_inner();
+
+        Self {
+            bits: BufferHandle::new_host(buffer),
+            meta: BitBufferMeta::new(offset, len),
         }
     }
 
@@ -367,6 +373,7 @@ mod tests {
     use std::iter::repeat_n;
 
     use vortex_buffer::BitBuffer;
+    use vortex_buffer::BitBufferMeta;
     use vortex_buffer::BitBufferMut;
     use vortex_buffer::buffer;
 
@@ -377,6 +384,7 @@ mod tests {
     use crate::arrays::PrimitiveArray;
     use crate::arrays::bool::BoolArrayExt;
     use crate::assert_arrays_eq;
+    use crate::buffer::BufferHandle;
     use crate::patches::Patches;
     use crate::validity::Validity;
 
@@ -487,6 +495,20 @@ mod tests {
         let arr = BoolArray::from(BitBuffer::new_set(16));
         let sliced = arr.slice(4..12).unwrap();
         assert_arrays_eq!(sliced, BoolArray::from_iter([true; 8]));
+    }
+
+    #[test]
+    fn constructors_trim_oversized_backing_buffer() {
+        let bits = BitBuffer::new_set(8192).slice(3..11);
+        let expected_nbytes = BitBufferMeta::new(bits.offset(), bits.len()).byte_len() as u64;
+
+        let handle = BufferHandle::new_host(bits.inner().clone());
+        let from_handle =
+            BoolArray::new_handle(handle, bits.offset(), bits.len(), Validity::NonNullable);
+        let unchecked = unsafe { BoolArray::new_unchecked(bits, Validity::NonNullable) };
+
+        assert_eq!(from_handle.nbytes(), expected_nbytes);
+        assert_eq!(unchecked.nbytes(), expected_nbytes);
     }
 
     #[test]
