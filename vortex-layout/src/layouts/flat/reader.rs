@@ -18,6 +18,7 @@ use vortex_array::serde::SerializedArray;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_mask::Mask;
+use vortex_session::SessionExt;
 use vortex_session::VortexSession;
 
 use crate::layouts::SharedArrayFuture;
@@ -26,6 +27,7 @@ use crate::reader::LayoutReader;
 use crate::reader::RowSplits;
 use crate::reader::SplitRange;
 use crate::segments::SegmentSource;
+use crate::session::RangeReadEnabled;
 
 /// The threshold of mask density below which we will evaluate the expression only over the
 /// selected rows, and above which we evaluate the expression over all rows and then select
@@ -86,6 +88,43 @@ impl FlatReader {
         .boxed()
         .shared()
     }
+
+    /// Plan and execute a sub-segment read for a logical row range when possible.
+    fn try_range_read_array(
+        &self,
+        row_range: Range<usize>,
+    ) -> VortexResult<Option<SharedArrayFuture>> {
+        if !self.session.get::<RangeReadEnabled>().0 {
+            return Ok(None);
+        }
+
+        let Some(array_tree) = self.layout.array_tree() else {
+            return Ok(None);
+        };
+        let row_count =
+            usize::try_from(self.layout.row_count()).vortex_expect("row count must fit in usize");
+        let Some(plan) = super::range_read::try_plan_range_read(
+            array_tree,
+            row_range,
+            row_count,
+            self.layout.dtype(),
+            self.layout.array_ctx(),
+            &self.session,
+        )?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(super::range_read::execute_range_read(
+            plan,
+            array_tree.clone(),
+            self.layout.segment_id(),
+            Arc::clone(&self.segment_source),
+            self.layout.dtype().clone(),
+            self.layout.array_ctx().clone(),
+            self.session.clone(),
+        )))
+    }
 }
 
 impl LayoutReader for FlatReader {
@@ -132,7 +171,10 @@ impl LayoutReader for FlatReader {
             ..usize::try_from(row_range.end)
                 .vortex_expect("Row range end must fit within FlatLayout size");
         let name = Arc::clone(&self.name);
-        let array = self.array_future();
+        let (array, already_sliced) = match self.try_range_read_array(row_range.clone())? {
+            Some(array) => (array, true),
+            None => (self.array_future(), false),
+        };
         let expr = expr.clone();
         let session = self.session.clone();
 
@@ -144,7 +186,7 @@ impl LayoutReader for FlatReader {
             let mask = mask.await?;
 
             // Slice the array based on the row mask.
-            if row_range.start > 0 || row_range.end < array.len() {
+            if !already_sliced && (row_range.start > 0 || row_range.end < array.len()) {
                 array = array.slice(row_range.clone())?;
             }
 
@@ -191,7 +233,10 @@ impl LayoutReader for FlatReader {
             ..usize::try_from(row_range.end)
                 .vortex_expect("Row range end must fit within FlatLayout size");
         let name = Arc::clone(&self.name);
-        let array = self.array_future();
+        let (array, already_sliced) = match self.try_range_read_array(row_range.clone())? {
+            Some(array) => (array, true),
+            None => (self.array_future(), false),
+        };
         let expr = expr.clone();
 
         Ok(async move {
@@ -201,7 +246,7 @@ impl LayoutReader for FlatReader {
             let mask = mask.await?;
 
             // Slice the array based on the row mask.
-            if row_range.start > 0 || row_range.end < array.len() {
+            if !already_sliced && (row_range.start > 0 || row_range.end < array.len()) {
                 array = array.slice(row_range.clone())?;
             }
 

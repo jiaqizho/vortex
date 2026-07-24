@@ -3,6 +3,7 @@
 
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Range;
 use std::sync::Arc;
 
 use vortex_error::VortexExpect;
@@ -22,7 +23,11 @@ use crate::ExecutionResult;
 use crate::array::Array;
 use crate::array::ArrayId;
 use crate::array::ArrayView;
+use crate::array::ChildRangeRead;
+use crate::array::EncodingRangeRead;
+use crate::array::RangeDecodeInfo;
 use crate::array::VTable;
+use crate::array::ValidityRangeRead;
 use crate::arrays::fixed_size_list::FixedSizeListData;
 use crate::arrays::fixed_size_list::array::ELEMENTS_SLOT;
 use crate::arrays::fixed_size_list::array::NUM_SLOTS;
@@ -195,5 +200,45 @@ impl VTable for FixedSizeList {
 
     fn execute(array: Array<Self>, _ctx: &mut ExecutionCtx) -> VortexResult<ExecutionResult> {
         Ok(ExecutionResult::done(array))
+    }
+
+    fn plan_range_read(
+        &self,
+        _metadata: &[u8],
+        row_range: Range<usize>,
+        row_count: usize,
+        dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        let DType::FixedSizeList(element_dtype, list_size, _) = dtype else {
+            return Ok(None);
+        };
+        let list_size = *list_size as usize;
+        if list_size == 0 {
+            return Ok(None);
+        }
+        let Some(element_start) = row_range.start.checked_mul(list_size) else {
+            return Ok(None);
+        };
+        let Some(element_end) = row_range.end.checked_mul(list_size) else {
+            return Ok(None);
+        };
+        let Some(element_count) = row_count.checked_mul(list_size) else {
+            return Ok(None);
+        };
+
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![ChildRangeRead::Recurse {
+                row_range: element_start..element_end,
+                row_count: element_count,
+                dtype: element_dtype.as_ref().clone(),
+            }],
+            decode_info: RangeDecodeInfo::FromChild {
+                child_idx: 0,
+                divisor: list_size,
+            },
+            validity: ValidityRangeRead::Optional,
+        }))
     }
 }

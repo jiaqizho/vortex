@@ -4,6 +4,7 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Range;
 
 use vortex_buffer::ByteBufferMut;
 use vortex_error::VortexExpect;
@@ -23,7 +24,11 @@ use crate::IntoArray;
 use crate::array::Array;
 use crate::array::ArrayId;
 use crate::array::ArrayView;
+use crate::array::BufferSubRange;
+use crate::array::EncodingRangeRead;
+use crate::array::RangeDecodeInfo;
 use crate::array::VTable;
+use crate::array::ValidityRangeRead;
 use crate::arrays::constant::ConstantData;
 use crate::arrays::constant::compute::rules::PARENT_RULES;
 use crate::arrays::constant::vtable::canonical::constant_canonicalize;
@@ -165,6 +170,22 @@ impl VTable for Constant {
             array.as_view(),
             ctx,
         )?))
+    }
+
+    fn plan_range_read(
+        &self,
+        _metadata: &[u8],
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![BufferSubRange::Full],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Rows(row_range),
+            validity: ValidityRangeRead::None,
+        }))
     }
 
     fn append_to_builder(

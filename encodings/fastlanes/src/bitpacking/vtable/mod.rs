@@ -3,6 +3,7 @@
 
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Range;
 
 use prost::Message;
 use vortex_array::Array;
@@ -29,7 +30,11 @@ use vortex_array::require_patches;
 use vortex_array::require_validity;
 use vortex_array::serde::ArrayChildren;
 use vortex_array::validity::Validity;
+use vortex_array::vtable::BufferSubRange;
+use vortex_array::vtable::EncodingRangeRead;
+use vortex_array::vtable::RangeDecodeInfo;
 use vortex_array::vtable::VTable;
+use vortex_array::vtable::ValidityRangeRead;
 use vortex_array::vtable::child_to_validity;
 use vortex_array::vtable::validity_to_child;
 use vortex_error::VortexExpect;
@@ -283,6 +288,48 @@ impl VTable for BitPacked {
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         RULES.evaluate(array, parent, child_idx)
+    }
+
+    fn plan_range_read(
+        &self,
+        metadata: &[u8],
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        let metadata = BitPackedMetadata::decode(metadata)?;
+        if metadata.patches.is_some() || metadata.bit_width > 64 || metadata.offset >= 1024 {
+            return Ok(None);
+        }
+
+        let bit_width = metadata.bit_width as usize;
+        let offset = metadata.offset as usize;
+        let decoded_start = row_range.start / 1024 * 1024;
+        let decode_len = row_range.end - decoded_start;
+        let first_block = decoded_start / 1024;
+        let Some(num_blocks) = offset.checked_add(decode_len).map(|len| len.div_ceil(1024)) else {
+            return Ok(None);
+        };
+        let Some(bytes_per_block) = 128usize.checked_mul(bit_width) else {
+            return Ok(None);
+        };
+        let Some(byte_start) = first_block.checked_mul(bytes_per_block) else {
+            return Ok(None);
+        };
+        let Some(byte_len) = num_blocks.checked_mul(bytes_per_block) else {
+            return Ok(None);
+        };
+        let Some(byte_end) = byte_start.checked_add(byte_len) else {
+            return Ok(None);
+        };
+
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![BufferSubRange::Range(byte_start..byte_end)],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Rows(decoded_start..row_range.end),
+            validity: ValidityRangeRead::Optional,
+        }))
     }
 }
 

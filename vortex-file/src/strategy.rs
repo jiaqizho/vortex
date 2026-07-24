@@ -146,6 +146,7 @@ enum CompressorConfig {
 pub struct WriteStrategyBuilder {
     compressor: CompressorConfig,
     row_block_size: usize,
+    inline_array_node: bool,
     field_writers: HashMap<FieldPath, Arc<dyn LayoutStrategy>>,
     allow_encodings: Option<HashSet<ArrayId>>,
     flat_strategy: Option<Arc<dyn LayoutStrategy>>,
@@ -158,6 +159,7 @@ impl Default for WriteStrategyBuilder {
         Self {
             compressor: CompressorConfig::BtrBlocks(BtrBlocksCompressorBuilder::default()),
             row_block_size: 8192,
+            inline_array_node: false,
             field_writers: HashMap::new(),
             allow_encodings: Some(ALLOWED_ENCODINGS.clone()),
             flat_strategy: None,
@@ -169,6 +171,14 @@ impl WriteStrategyBuilder {
     /// Override the row block size used to determine the zone map sizes.
     pub fn with_row_block_size(mut self, row_block_size: usize) -> Self {
         self.row_block_size = row_block_size;
+        self
+    }
+
+    /// Store serialized array trees in FlatLayout metadata.
+    ///
+    /// This applies to the default flat layout strategy and enables sub-segment range reads.
+    pub fn with_inline_array_node(mut self, inline_array_node: bool) -> Self {
+        self.inline_array_node = inline_array_node;
         self
     }
 
@@ -221,9 +231,13 @@ impl WriteStrategyBuilder {
         let flat: Arc<dyn LayoutStrategy> = if let Some(flat) = self.flat_strategy {
             flat
         } else if let Some(allow_encodings) = self.allow_encodings {
-            Arc::new(FlatLayoutStrategy::default().with_allow_encodings(allow_encodings))
+            Arc::new(
+                FlatLayoutStrategy::default()
+                    .with_inline_array_node(self.inline_array_node)
+                    .with_allow_encodings(allow_encodings),
+            )
         } else {
-            Arc::new(FlatLayoutStrategy::default())
+            Arc::new(FlatLayoutStrategy::default().with_inline_array_node(self.inline_array_node))
         };
 
         // 7. for each chunk create a flat layout

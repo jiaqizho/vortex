@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hasher;
+use std::ops::Range;
 
 use vortex_array::Array;
 use vortex_array::ArrayEq;
@@ -25,8 +26,12 @@ use vortex_array::dtype::DType;
 use vortex_array::scalar::Scalar;
 use vortex_array::serde::ArrayChildren;
 use vortex_array::validity::Validity;
+use vortex_array::vtable::BufferSubRange;
+use vortex_array::vtable::EncodingRangeRead;
 use vortex_array::vtable::OperationsVTable;
+use vortex_array::vtable::RangeDecodeInfo;
 use vortex_array::vtable::VTable;
+use vortex_array::vtable::ValidityRangeRead;
 use vortex_array::vtable::ValidityVTable;
 use vortex_array::vtable::child_to_validity;
 use vortex_array::vtable::validity_to_child;
@@ -165,6 +170,22 @@ impl VTable for ByteBool {
         ctx: &mut ExecutionCtx,
     ) -> VortexResult<Option<ArrayRef>> {
         PARENT_KERNELS.execute(array, parent, child_idx, ctx)
+    }
+
+    fn plan_range_read(
+        &self,
+        _metadata: &[u8],
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![BufferSubRange::Range(row_range.clone())],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Rows(row_range),
+            validity: ValidityRangeRead::Optional,
+        }))
     }
 }
 

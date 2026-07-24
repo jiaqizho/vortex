@@ -261,8 +261,18 @@ pub trait ArrayChildren {
     /// Returns the nth child of the array with the given dtype and length.
     fn get(&self, index: usize, dtype: &DType, len: usize) -> VortexResult<ArrayRef>;
 
+    /// Returns a child known to be complete even when its parent is partially decoded.
+    fn get_full(&self, index: usize, dtype: &DType, len: usize) -> VortexResult<ArrayRef> {
+        self.get(index, dtype, len)
+    }
+
     /// The number of children.
     fn len(&self) -> usize;
+
+    /// Whether the parent is being decoded from only part of the serialized logical array.
+    fn is_partial_decode(&self) -> bool {
+        false
+    }
 
     /// Returns true if there are no children.
     fn is_empty(&self) -> bool {
@@ -321,6 +331,28 @@ impl SerializedArray {
         ctx: &ReadContext,
         session: &VortexSession,
     ) -> VortexResult<ArrayRef> {
+        self.decode_impl(dtype, len, ctx, session, false)
+    }
+
+    /// Decode a logical subset without restoring whole-array information.
+    pub fn decode_partial(
+        &self,
+        dtype: &DType,
+        len: usize,
+        ctx: &ReadContext,
+        session: &VortexSession,
+    ) -> VortexResult<ArrayRef> {
+        self.decode_impl(dtype, len, ctx, session, true)
+    }
+
+    fn decode_impl(
+        &self,
+        dtype: &DType,
+        len: usize,
+        ctx: &ReadContext,
+        session: &VortexSession,
+        partial_decode: bool,
+    ) -> VortexResult<ArrayRef> {
         let encoding_idx = self.flatbuffer().encoding();
         let encoding_id = ctx
             .resolve(encoding_idx)
@@ -336,6 +368,7 @@ impl SerializedArray {
             ser: self,
             ctx,
             session,
+            partial_decode,
         };
 
         let buffers = self.collect_buffers()?;
@@ -368,7 +401,7 @@ impl SerializedArray {
         );
 
         // Populate statistics from the serialized array.
-        if let Some(stats) = self.flatbuffer().stats() {
+        if !partial_decode && let Some(stats) = self.flatbuffer().stats() {
             decoded
                 .statistics()
                 .set_iter(StatsSet::from_flatbuffer(&stats, dtype, session)?.into_iter());
@@ -649,17 +682,28 @@ struct SerializedArrayChildren<'a> {
     ser: &'a SerializedArray,
     ctx: &'a ReadContext,
     session: &'a VortexSession,
+    partial_decode: bool,
 }
 
 impl ArrayChildren for SerializedArrayChildren<'_> {
     fn get(&self, index: usize, dtype: &DType, len: usize) -> VortexResult<ArrayRef> {
         self.ser
             .child(index)
-            .decode(dtype, len, self.ctx, self.session)
+            .decode_impl(dtype, len, self.ctx, self.session, self.partial_decode)
+    }
+
+    fn get_full(&self, index: usize, dtype: &DType, len: usize) -> VortexResult<ArrayRef> {
+        self.ser
+            .child(index)
+            .decode_impl(dtype, len, self.ctx, self.session, false)
     }
 
     fn len(&self) -> usize {
         self.ser.nchildren()
+    }
+
+    fn is_partial_decode(&self) -> bool {
+        self.partial_decode
     }
 }
 

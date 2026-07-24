@@ -144,9 +144,72 @@ impl FileSegmentSource {
             next_id: Arc::new(AtomicUsize::new(0)),
         }
     }
+
+    fn request_at(&self, offset: u64, length: usize, alignment: Alignment) -> SegmentFuture {
+        let (send, recv) = oneshot::channel();
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let event = ReadEvent::Request(ReadRequest {
+            id,
+            offset,
+            length,
+            alignment,
+            callback: send,
+        });
+
+        if let Err(e) = self.events.unbounded_send(event) {
+            return future::ready(Err(vortex_err!("Failed to submit read request: {e}"))).boxed();
+        }
+
+        ReadFuture {
+            id,
+            recv: recv.into_future(),
+            polled: false,
+            finished: false,
+            events: self.events.clone(),
+        }
+        .boxed()
+    }
 }
 
 impl SegmentSource for FileSegmentSource {
+    fn request_range(&self, id: SegmentId, range: std::ops::Range<usize>) -> SegmentFuture {
+        let spec = *match self.segments.get(*id as usize) {
+            Some(spec) => spec,
+            None => {
+                return future::ready(Err(vortex_err!("Missing segment: {}", id))).boxed();
+            }
+        };
+
+        let segment_len = spec.length as usize;
+        if range.start > range.end || range.end > segment_len {
+            return future::ready(Err(vortex_err!(
+                "Segment {} range {}..{} out of bounds for segment of length {}",
+                id,
+                range.start,
+                range.end,
+                segment_len
+            )))
+            .boxed();
+        }
+
+        let range_offset = match u64::try_from(range.start)
+            .ok()
+            .and_then(|start| spec.offset.checked_add(start))
+        {
+            Some(offset) => offset,
+            None => {
+                return future::ready(Err(vortex_err!(
+                    "Segment {} range start {} overflowed file offset",
+                    id,
+                    range.start
+                )))
+                .boxed();
+            }
+        };
+
+        self.request_at(range_offset, range.len(), Alignment::none())
+    }
+
     fn request(&self, id: SegmentId) -> SegmentFuture {
         // We eagerly register the read request here assuming the behaviour of [`FileSegmentSource`], where
         // coalescing becomes effective prior to the future being polled.
@@ -163,31 +226,7 @@ impl SegmentSource for FileSegmentSource {
             alignment,
         } = spec;
 
-        let (send, recv) = oneshot::channel();
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let event = ReadEvent::Request(ReadRequest {
-            id,
-            offset,
-            length: length as usize,
-            alignment,
-            callback: send,
-        });
-
-        // If we fail to submit the event, we create a future that has failed.
-        if let Err(e) = self.events.unbounded_send(event) {
-            return future::ready(Err(vortex_err!("Failed to submit read request: {e}"))).boxed();
-        }
-
-        let fut = ReadFuture {
-            id,
-            recv: recv.into_future(),
-            polled: false,
-            finished: false,
-            events: self.events.clone(),
-        };
-
-        // One allocation: we only box the returned SegmentFuture, not the inner ReadFuture.
-        fut.boxed()
+        self.request_at(offset, length as usize, alignment)
     }
 }
 
@@ -283,6 +322,61 @@ impl BufferSegmentSource {
 }
 
 impl SegmentSource for BufferSegmentSource {
+    fn request_range(&self, id: SegmentId, range: std::ops::Range<usize>) -> SegmentFuture {
+        let spec = match self.segments.get(*id as usize) {
+            Some(spec) => spec,
+            None => {
+                return future::ready(Err(vortex_err!("Missing segment: {}", id))).boxed();
+            }
+        };
+
+        let segment_len = spec.length as usize;
+        if range.start > range.end || range.end > segment_len {
+            return future::ready(Err(vortex_err!(
+                "Segment {} range {}..{} out of bounds for segment of length {}",
+                id,
+                range.start,
+                range.end,
+                segment_len
+            )))
+            .boxed();
+        }
+
+        let Some(start) = usize::try_from(spec.offset)
+            .ok()
+            .and_then(|offset| offset.checked_add(range.start))
+        else {
+            return future::ready(Err(vortex_err!(
+                "Segment {} range start overflowed buffer offset",
+                id
+            )))
+            .boxed();
+        };
+        let Some(end) = usize::try_from(spec.offset)
+            .ok()
+            .and_then(|offset| offset.checked_add(range.end))
+        else {
+            return future::ready(Err(vortex_err!(
+                "Segment {} range end overflowed buffer offset",
+                id
+            )))
+            .boxed();
+        };
+        if end > self.buffer.len() {
+            return future::ready(Err(vortex_err!(
+                "Segment {} range {}..{} out of bounds for buffer of length {}",
+                *id,
+                start,
+                end,
+                self.buffer.len()
+            )))
+            .boxed();
+        }
+
+        let slice = self.buffer.slice_unaligned(start..end);
+        future::ready(Ok(BufferHandle::new_host(slice))).boxed()
+    }
+
     fn request(&self, id: SegmentId) -> SegmentFuture {
         let spec = match self.segments.get(*id as usize) {
             Some(spec) => spec,
@@ -304,7 +398,53 @@ impl SegmentSource for BufferSegmentSource {
             .boxed();
         }
 
-        let slice = self.buffer.slice(start..end).aligned(spec.alignment);
+        let slice = self
+            .buffer
+            .slice_unaligned(start..end)
+            .aligned(spec.alignment);
         future::ready(Ok(BufferHandle::new_host(slice))).boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vortex_error::vortex_err;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn buffer_segment_requests_handle_stronger_backing_alignment_zero_copy()
+    -> VortexResult<()> {
+        let buffer = ByteBuffer::copy_from_aligned([0, 1, 2, 3, 4, 5, 6, 7], Alignment::new(8));
+        let expected_ptr = buffer.as_ptr().wrapping_add(4);
+        let source = BufferSegmentSource::new(
+            buffer,
+            vec![SegmentSpec {
+                offset: 4,
+                length: 4,
+                alignment: Alignment::new(4),
+            }]
+            .into(),
+        );
+        let id = SegmentId::from(0);
+
+        let result = source.request_range(id, 0..4).await?;
+        let result = result
+            .as_host_opt()
+            .ok_or_else(|| vortex_err!("expected host buffer"))?;
+
+        assert_eq!(result.as_ref(), &[4, 5, 6, 7]);
+        assert_eq!(result.alignment(), Alignment::none());
+        assert_eq!(result.as_ptr(), expected_ptr);
+
+        let result = source.request(id).await?;
+        let result = result
+            .as_host_opt()
+            .ok_or_else(|| vortex_err!("expected host buffer"))?;
+
+        assert_eq!(result.as_ref(), &[4, 5, 6, 7]);
+        assert_eq!(result.alignment(), Alignment::new(4));
+        assert_eq!(result.as_ptr(), expected_ptr);
+        Ok(())
     }
 }

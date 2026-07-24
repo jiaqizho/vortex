@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::ops::Range;
+
 use vortex_error::VortexResult;
 use vortex_error::vortex_ensure;
 use vortex_error::vortex_panic;
@@ -15,8 +17,11 @@ use crate::array::ArrayId;
 use crate::array::ArrayParts;
 use crate::array::ArrayView;
 use crate::array::EmptyArrayData;
+use crate::array::EncodingRangeRead;
 use crate::array::OperationsVTable;
+use crate::array::RangeDecodeInfo;
 use crate::array::VTable;
+use crate::array::ValidityRangeRead;
 use crate::array::ValidityVTable;
 use crate::arrays::null::compute::rules::PARENT_RULES;
 use crate::buffer::BufferHandle;
@@ -108,6 +113,22 @@ impl VTable for Null {
 
     fn execute(array: Array<Self>, _ctx: &mut ExecutionCtx) -> VortexResult<ExecutionResult> {
         Ok(ExecutionResult::done(array))
+    }
+
+    fn plan_range_read(
+        &self,
+        _metadata: &[u8],
+        row_range: Range<usize>,
+        _row_count: usize,
+        _dtype: &DType,
+        _session: &VortexSession,
+    ) -> VortexResult<Option<EncodingRangeRead>> {
+        Ok(Some(EncodingRangeRead {
+            buffer_sub_ranges: vec![],
+            children: vec![],
+            decode_info: RangeDecodeInfo::Rows(row_range),
+            validity: ValidityRangeRead::None,
+        }))
     }
 }
 

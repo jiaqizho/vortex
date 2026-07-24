@@ -20,7 +20,7 @@ pub mod zone_map;
 
 use std::sync::Arc;
 
-pub(crate) use builder::StatsAccumulator;
+pub use builder::StatsAccumulator;
 pub use schema::MAX_IS_TRUNCATED;
 pub use schema::MIN_IS_TRUNCATED;
 use vortex_array::DeserializeMetadata;

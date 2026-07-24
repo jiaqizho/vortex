@@ -66,6 +66,47 @@ impl SessionVar for LayoutSession {
     }
 }
 
+/// Session variable controlling whether FlatLayout sub-segment reads are enabled.
+///
+/// Range reads require the serialized array tree to be present in FlatLayout metadata. Readers
+/// automatically fall back to a full segment when it is absent or an encoding cannot plan the
+/// requested range.
+#[derive(Debug, Clone)]
+pub struct RangeReadEnabled(pub bool);
+
+impl Default for RangeReadEnabled {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+impl SessionVar for RangeReadEnabled {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+/// Session variable controlling whether FlatLayout range reads may issue separate validity reads.
+///
+/// When disabled, a range-read plan falls back to a full-segment read if its validity buffers are
+/// not already covered by the single contiguous data request.
+#[derive(Debug, Clone, Default)]
+pub struct SeparateValidityReadsEnabled(pub bool);
+
+impl SessionVar for SeparateValidityReadsEnabled {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 /// Extension trait for accessing layout session data.
 pub trait LayoutSessionExt: SessionExt {
     /// Returns the layout encoding registry.
