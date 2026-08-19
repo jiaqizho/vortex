@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use async_stream::stream;
@@ -29,13 +30,24 @@ use crate::sequence::SequentialStreamExt as _;
 pub struct ChunkedLayoutStrategy {
     /// The layout strategy for each chunk.
     pub chunk_strategy: Arc<dyn LayoutStrategy>,
+    max_concurrent_children: NonZeroUsize,
 }
 
 impl ChunkedLayoutStrategy {
     pub fn new<S: LayoutStrategy>(chunk_strategy: S) -> Self {
         Self {
             chunk_strategy: Arc::new(chunk_strategy),
+            max_concurrent_children: NonZeroUsize::MAX,
         }
+    }
+
+    /// Sets the maximum number of child layouts processed concurrently.
+    ///
+    /// Limiting concurrency bounds the number of in-flight chunks, but callers must ensure the
+    /// child strategy does not require later chunks to make progress while writing to EOF.
+    pub fn with_max_concurrent_children(mut self, max_concurrent_children: NonZeroUsize) -> Self {
+        self.max_concurrent_children = max_concurrent_children;
+        self
     }
 }
 
@@ -86,7 +98,10 @@ impl LayoutStrategy for ChunkedLayoutStrategy {
         };
 
         // Poll all of our children concurrently to accumulate their layouts.
-        let mut child_layouts: Vec<LayoutRef> = stream.buffered(usize::MAX).try_collect().await?;
+        let mut child_layouts: Vec<LayoutRef> = stream
+            .buffered(self.max_concurrent_children.get())
+            .try_collect()
+            .await?;
 
         if child_layouts.len() == 1 {
             Ok(child_layouts.pop().vortex_expect("must have one child"))
@@ -103,5 +118,23 @@ impl LayoutStrategy for ChunkedLayoutStrategy {
 
     fn buffered_bytes(&self) -> u64 {
         self.chunk_strategy.buffered_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+
+    use super::ChunkedLayoutStrategy;
+    use crate::layouts::flat::writer::FlatLayoutStrategy;
+
+    #[test]
+    fn configures_max_concurrent_children() {
+        let strategy = ChunkedLayoutStrategy::new(FlatLayoutStrategy::default());
+        assert_eq!(strategy.max_concurrent_children, NonZeroUsize::MAX);
+
+        let max_concurrent_children = NonZeroUsize::new(8).expect("eight is non-zero");
+        let strategy = strategy.with_max_concurrent_children(max_concurrent_children);
+        assert_eq!(strategy.max_concurrent_children, max_concurrent_children);
     }
 }
